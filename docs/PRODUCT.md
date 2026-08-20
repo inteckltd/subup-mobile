@@ -11,7 +11,7 @@ structured **groups**, **games**, **payments**, **scores**, and a lightweight
 
 **Working name:** PitchIn  
 **Platforms:** iOS and Android via **Expo (React Native)**  
-**Backend:** **Supabase** (Auth, Postgres, RLS, Edge Functions, Storage later)  
+**Backend:** **Supabase** (Auth, Postgres, RLS, Storage, Edge Functions)  
 **UI:** **NativeWind** + Expo Router  
 **Primary market:** United Kingdom (UK phone numbers only for now)
 
@@ -46,55 +46,42 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 
 ## Auth model (important)
 
+> **Currently:** sign-up/login are password-only. SMS OTP, forgot password, and
+> Apple/Google sign-in are not in the app (Twilio blocked outbound SMS). The
+> target model below is what to restore later — see `docs/AUTH_BACKLOG.md`.
+
 - **Primary identifier:** UK mobile number
-- **Login:** Mobile + password → **SMS OTP every time** (2-step) → session
+- **Login (now):** Mobile + password → session
+- **Login (target):** Mobile + password → **SMS OTP every time** (2-step) → session
 - **Email:** Optional; captured for receipts/comms later — **not** used to log in
-- **Sign up:** Name, UK mobile, password, optional email, accept Terms + Privacy → SMS OTP verify
-- **Forgot password:** Phase 1 (reset via mobile OTP + new password flow)
-- **Social:** Sign in with **Apple** and **Google** (link/create profile; still collect UK mobile if missing before main app features)
+- **Sign up:** Name, UK mobile, password, optional email, accept Terms + Privacy. Versions are stored on the profile; bumping `TERMS_VERSION` / `PRIVACY_VERSION` re-prompts existing users.
+- **Forgot password:** Not built (target: mobile OTP or email reset)
+- **Social:** Not built (target: Apple + Google, still collect UK mobile if missing)
+- **Account deletion:** Settings → Delete account (required by Apple)
 - **No age gate** in v1
-- **No SMS OTP to email** — OTP is **mobile SMS only**
 
 ## Feature modules (roadmap)
 
-### Phase 1 — Auth (current)
-- Sign up, Verify (SMS OTP), Login (password + SMS OTP)
-- Forgot password
-- Apple + Google sign-in
-- Session persistence, auth gate, placeholder home
-- `profiles` table + RLS
-- Terms + Privacy acceptance recorded
+### Phase 1 — Auth
+**Built (password-only).** Sign up, login, session, profiles, Terms/Privacy with versioned re-consent, account deletion.
 
 ### Phase 2 — Groups & members
-- Create group (name, sport, venue defaults, description, cover)
-- Invite by mobile (and email if present)
-- Accept / decline invite
-- Members list, roles, promote admin
-- Basic group detail screen
+**Built.** Create/edit group (including sport), invite by mobile (existing users), accept/decline, members, promote/kick, last-admin protection.
 
 ### Phase 3 — Games & lobby
-- Create game (schedule, venue, min/max, cost, notes, cash allowed)
-- Join / leave, max cap, lobby player list
-- Payment status chips (Paid, Cash, Unpaid)
-- Auto-cancel job if min not met at T-24h
+**Built.** Create/edit/cancel game, join/leave/waitlist, lock window, auto-cancel if min not met, MMR-balanced team pick. Payment chips display status only — join always writes `unpaid`.
 
 ### Phase 4 — Payments
-- In-app card pay (e.g. Stripe) to organiser
-- Admin marks cash / waived / refund
-- Cancel/refund rules
+**Not built.** Stripe card pay, admin mark cash/waived/refund, cancel/refund rules.
 
 ### Phase 5 — Results & MMR
-- Admin enters score
-- MOTM voting
-- MMR calculation (start rating, win/draw/loss, MOTM bump)
-- Game history + player stats
+**Built.** Admin score entry, MOTM voting, Elo-style MMR + MOTM bump, history and profile stats.
 
 ### Phase 6+ (later)
-- Waitlist, recurring games, team balance helper
-- Announcements / light chat
+- Recurring games, announcements / light chat
 - Reliability (show-up %)
-- Push notifications
 - Per-sport or per-group MMR
+- Invite people who do not have the app yet
 
 ## Domain concepts
 
@@ -118,27 +105,27 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 
 ## Tech stack (locked)
 
-- Expo (managed) + React Native + TypeScript
+- Expo (managed) + React Native + TypeScript (`/mobile`)
 - Expo Router
 - NativeWind
-- Supabase: Auth, Postgres, RLS, Edge Functions
+- Supabase: Auth, Postgres, RLS, Storage, Edge Functions
 - Forms: react-hook-form + zod
 - Secure session storage (expo-secure-store)
-- SMS via Supabase phone auth provider (e.g. Twilio)
-- Social: Apple + Google → Supabase
+- Push: expo-notifications + Expo Push API
+- Errors: Sentry (`@sentry/react-native` + Edge Function reporting)
 
 ## Supabase project
 
 - Create in region **eu-west-2 (London)** when ready
-- Never commit service role keys
-- Client uses anon key only; privileged ops in Edge Functions
+- Never commit service role / secret keys
+- Client uses the publishable (anon-equivalent) key only; privileged ops live in Edge Functions
 
 ## What not to build until the right phase
 
 - Do not skip RLS
 - Do not use WhatsApp as a backend
 - Do not make groups public by default
-- Do not implement payments/MMR in Phase 1
+- Do not implement payments until Phase 4
 
 ## Pitch (one liner)
 

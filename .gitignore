@@ -30,7 +30,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# env files (never commit secrets)
+.env
+.env.local
 .env*.local
 
 # typescript
@@ -39,3 +41,14 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# IDE
+.cursor/
+.claude/
+
+# Supabase CLI local cache (project ref, pooler URL, etc.)
+supabase/.temp/
+
+# Seed data
+supabase/seed_test_data.sql
+supabase/seed_app_review_user.sql

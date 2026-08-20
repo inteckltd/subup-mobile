@@ -1,0 +1,16 @@
+project_id = "pitch-in"
+
+# send-score-reminders is called by pg_cron via pg_net (see
+# migrations/009_game_duration_score.sql), which never sends a Supabase
+# Authorization header — only this function's own `x-cron-secret` check
+# authenticates the caller. Without `verify_jwt = false` here, Supabase's
+# Edge Function gateway rejects the request with 401
+# "Missing authorization header" before our code ever runs.
+[functions.send-score-reminders]
+verify_jwt = false
+
+[functions.close-motm-votes]
+verify_jwt = false
+
+[functions.apply-game-lock]
+verify_jwt = false
