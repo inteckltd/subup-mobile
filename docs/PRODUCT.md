@@ -46,16 +46,17 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 
 ## Auth model (important)
 
-> **Currently:** sign-up/login are password-only. SMS OTP, forgot password, and
-> Apple/Google sign-in are not in the app (Twilio blocked outbound SMS). The
-> target model below is what to restore later — see `docs/AUTH_BACKLOG.md`.
+> **Currently:** sign-up/login are mobile + password. New accounts confirm the
+> mobile once via SMS OTP. Forgot password also uses SMS OTP. Apple/Google
+> sign-in and OTP-on-every-login are not in the app — see
+> `docs/TEMP_CATEGORY_2_FUTURE.md`.
 
 - **Primary identifier:** UK mobile number
 - **Login (now):** Mobile + password → session
 - **Login (target):** Mobile + password → **SMS OTP every time** (2-step) → session
 - **Email:** Optional; captured for receipts/comms later — **not** used to log in
-- **Sign up:** Name, UK mobile, password, optional email, accept Terms + Privacy. Versions are stored on the profile; bumping `TERMS_VERSION` / `PRIVACY_VERSION` re-prompts existing users.
-- **Forgot password:** Not built (target: mobile OTP or email reset)
+- **Sign up:** Name, UK mobile, password, optional email, accept Terms + Privacy, then one-time SMS confirm. Versions are stored on the profile; bumping `TERMS_VERSION` / `PRIVACY_VERSION` re-prompts existing users.
+- **Forgot password:** Mobile OTP via Twilio, then set a new password
 - **Social:** Not built (target: Apple + Google, still collect UK mobile if missing)
 - **Account deletion:** Settings → Delete account (required by Apple)
 - **No age gate** in v1
@@ -63,16 +64,16 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 ## Feature modules (roadmap)
 
 ### Phase 1 — Auth
-**Built (password-only).** Sign up, login, session, profiles, Terms/Privacy with versioned re-consent, account deletion.
+**Built.** Sign up, login, session, profiles, one-time mobile confirm, forgot-password SMS OTP, Terms/Privacy with versioned re-consent, account deletion.
 
 ### Phase 2 — Groups & members
-**Built.** Create/edit group (including sport), invite by mobile (existing users), accept/decline, members, promote/kick, last-admin protection.
+**Built.** Create/edit group (including sport), invite by mobile (existing users get push; new numbers get an SMS download link), accept/decline, members, promote/kick, last-admin protection.
 
 ### Phase 3 — Games & lobby
-**Built.** Create/edit/cancel game, join/leave/waitlist, lock window, auto-cancel if min not met, MMR-balanced team pick. Payment chips display status only — join always writes `unpaid`.
+**Built.** Create/edit/cancel game, join/leave/waitlist, lock window, auto-cancel if min not met, MMR-balanced team pick. Join always writes `unpaid`. Payment chips stay hidden until Phase 4.
 
 ### Phase 4 — Payments
-**Not built.** Stripe card pay, admin mark cash/waived/refund, cancel/refund rules.
+**Required for public launch — not built.** Stripe card pay, admin mark cash/waived/refund, cancel/refund rules. See `docs/TEMP_CATEGORY_1_LAUNCH.md`.
 
 ### Phase 5 — Results & MMR
 **Built.** Admin score entry, MOTM voting, Elo-style MMR + MOTM bump, history and profile stats.
@@ -81,7 +82,6 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 - Recurring games, announcements / light chat
 - Reliability (show-up %)
 - Per-sport or per-group MMR
-- Invite people who do not have the app yet
 
 ## Domain concepts
 
@@ -125,7 +125,7 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 - Do not skip RLS
 - Do not use WhatsApp as a backend
 - Do not make groups public by default
-- Do not implement payments until Phase 4
+- Do not ship store builds with placeholder legal URLs or unpaid-chip theatre — Phase 4 + `TEMP_CATEGORY_1_LAUNCH.md`
 
 ## Pitch (one liner)
 

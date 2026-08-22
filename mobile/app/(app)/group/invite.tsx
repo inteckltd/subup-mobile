@@ -13,6 +13,7 @@ import { TextField } from '../../../src/features/auth/components/TextField';
 import { inviteGroupMember } from '../../../src/features/group-details/api';
 import { useGroupDetail } from '../../../src/features/group-details/hooks';
 import { isValidUkMobile } from '../../../src/lib/phone';
+import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
 
@@ -35,12 +36,14 @@ export default function InviteMemberScreen() {
     control,
     handleSubmit,
     reset,
-    formState: { errors, isValid },
+    formState: { errors, isValid, isDirty },
   } = useForm<InviteForm>({
     resolver: zodResolver(inviteSchema),
     mode: 'onChange',
     defaultValues: { mobile: '' },
   });
+
+  const { allowLeave } = useUnsavedChangesGuard(isDirty);
 
   const isAdmin = groupQuery.data?.role === 'admin';
 
@@ -55,7 +58,9 @@ export default function InviteMemberScreen() {
       return;
     }
     await queryClient.invalidateQueries({ queryKey: ['group', groupId, 'invites', session.user.id] });
+    await queryClient.invalidateQueries({ queryKey: ['home', 'pending-invites', session.user.id] });
     reset({ mobile: '' });
+    allowLeave();
     router.back();
   });
 
@@ -87,7 +92,7 @@ export default function InviteMemberScreen() {
         <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }} keyboardShouldPersistTaps="handled">
             <Text className="font-sans text-sm text-muted">
-              Invite someone who already has a PitchIn account by their UK mobile number.
+              Invite someone by their UK mobile number. If they don&apos;t have PitchIn yet, we&apos;ll text them a download link.
             </Text>
             <Controller
               control={control}

@@ -23,7 +23,9 @@ export default function AppLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
+      <Stack.Screen name="onboarding" options={{ presentation: 'fullScreenModal' }} />
       <Stack.Screen name="create-group" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="groups/index" />
       <Stack.Screen name="group/[id]" />
       <Stack.Screen name="group/invite" />
       <Stack.Screen name="group/edit" />

@@ -81,10 +81,16 @@ export function GroupGameCardSkeleton() {
   );
 }
 
-/** Matches `MemberCard`'s dimensions for the Members/Active Members loading state. */
-export function MemberCardSkeleton() {
+/** Matches `MemberCard`. Pass `fillRow` in a 2-column preview; omit it in a vertical list. */
+export function MemberCardSkeleton({ fillRow = false }: { fillRow?: boolean }) {
   return (
-    <View className="flex-1 flex-row items-center gap-3 rounded-2xl border border-border bg-white p-3">
+    <View
+      className={
+        fillRow
+          ? 'flex-1 flex-row items-center gap-3 rounded-2xl border border-border bg-white p-3'
+          : 'w-full flex-row items-center gap-3 rounded-2xl border border-border bg-white p-3'
+      }
+    >
       <Skeleton width={44} height={44} radius={22} />
       <View className="flex-1 gap-2">
         <Skeleton width="70%" height={13} radius={4} />

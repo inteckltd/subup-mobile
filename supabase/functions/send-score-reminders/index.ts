@@ -18,6 +18,7 @@
 // is no per-user RLS context to run as), same as notify-game-created's
 // service-role client, just without a preceding "verify this caller" step.
 
+import { timingSafeEqual } from '../_shared/crypto.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient, withJwtSkewRetry } from '../_shared/supabase.ts';
 
@@ -88,7 +89,7 @@ Deno.serve(async (req) => {
 
   const cronSecret = Deno.env.get('CRON_SECRET');
   const suppliedSecret = req.headers.get('x-cron-secret');
-  if (!cronSecret || !suppliedSecret || suppliedSecret !== cronSecret) {
+  if (!cronSecret || !suppliedSecret || !timingSafeEqual(suppliedSecret, cronSecret)) {
     return jsonResponse({ ok: false, error: 'Unauthorized' }, 401);
   }
 

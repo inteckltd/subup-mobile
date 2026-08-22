@@ -11,6 +11,7 @@ import { teamColorById } from '../../../src/features/games/schemas';
 import { Stepper } from '../../../src/features/groups/components/Stepper';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { formatDurationLabel, formatFullDateLabel, hasGameEnded } from '../../../src/lib/format';
+import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
 import { colors } from '../../../src/theme/tokens';
 
 /**
@@ -31,6 +32,8 @@ export default function EnterScoreScreen() {
   const [scoreHome, setScoreHome] = useState(0);
   const [scoreAway, setScoreAway] = useState(0);
   const [notes, setNotes] = useState('');
+  const isDirty = scoreHome !== 0 || scoreAway !== 0 || notes.trim().length > 0;
+  const { allowLeave } = useUnsavedChangesGuard(isDirty);
 
   if (gameQuery.isPending) {
     return (
@@ -57,6 +60,7 @@ export default function EnterScoreScreen() {
   const onSubmit = async () => {
     const ok = await submit(scoreHome, scoreAway, notes);
     if (ok) {
+      allowLeave();
       router.replace(`/games/${game.id}`);
     }
   };

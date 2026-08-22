@@ -10,9 +10,11 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
 import { TextField } from '../../../src/features/auth/components/TextField';
 import { Avatar } from '../../../src/features/home/components/Avatar';
-import { changePassword, updateMyMobile, updateProfileFields, uploadAvatar } from '../../../src/features/profile/api';
+import { OtpInput } from '../../../src/features/auth/components/OtpInput';
+import { changePassword, confirmMobileChange, requestMobileChangeOtp, updateProfileFields, uploadAvatar } from '../../../src/features/profile/api';
 import { editProfileSchema, type EditProfileFormValues } from '../../../src/features/profile/schemas';
 import { normalizeUkMobile, ukMobileNationalDigits } from '../../../src/lib/phone';
+import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
 
@@ -21,6 +23,8 @@ export default function EditProfileScreen() {
   const insets = useSafeAreaInsets();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingMobile, setPendingMobile] = useState<string | null>(null);
+  const [mobileCode, setMobileCode] = useState('');
 
   const hasPassword = session?.user.identities?.some((identity) => identity.provider === 'phone' || identity.provider === 'email') ?? false;
 
@@ -41,11 +45,13 @@ export default function EditProfileScreen() {
     handleSubmit,
     setValue,
     watch,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm<EditProfileFormValues>({
     resolver: zodResolver(editProfileSchema),
     defaultValues,
   });
+
+  const { allowLeave } = useUnsavedChangesGuard(isDirty);
 
   const avatarUri = watch('avatarUri');
 
@@ -94,9 +100,21 @@ export default function EditProfileScreen() {
 
       const nextMobile = normalizeUkMobile(values.mobile);
       if (nextMobile && nextMobile !== profile.mobile) {
-        const mobileResult = await updateMyMobile(nextMobile);
-        if (mobileResult.error) {
-          setSubmitError(mobileResult.error);
+        if (pendingMobile === nextMobile && mobileCode.length === 6) {
+          const confirmed = await confirmMobileChange(nextMobile, mobileCode);
+          if (confirmed.error) {
+            setSubmitError(confirmed.error);
+            return;
+          }
+        } else {
+          const requested = await requestMobileChangeOtp(nextMobile);
+          if (requested.error) {
+            setSubmitError(requested.error);
+            return;
+          }
+          setPendingMobile(nextMobile);
+          setMobileCode('');
+          setSubmitError('We sent a code to the new number. Enter it and tap Save again.');
           return;
         }
       }
@@ -114,6 +132,7 @@ export default function EditProfileScreen() {
       }
 
       await refreshProfile();
+      allowLeave();
       router.back();
     } finally {
       setSubmitting(false);
@@ -192,7 +211,7 @@ export default function EditProfileScreen() {
                   label="Phone number"
                   icon="call-outline"
                   keyboardType="phone-pad"
-                  placeholder="7912 345678"
+                  placeholder="07912 345678"
                   value={field.value}
                   onChangeText={field.onChange}
                   onBlur={field.onBlur}
@@ -200,6 +219,16 @@ export default function EditProfileScreen() {
                 />
               )}
             />
+            {pendingMobile ? (
+              <OtpInput
+                value={mobileCode}
+                onChange={(next) => {
+                  setMobileCode(next);
+                  setSubmitError(null);
+                }}
+                error={undefined}
+              />
+            ) : null}
           </View>
 
           {hasPassword ? (

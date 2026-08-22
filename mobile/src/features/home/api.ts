@@ -72,3 +72,20 @@ export async function fetchUpcomingGames(): Promise<GameCardModel[]> {
   if (error) throw friendlyError(error);
   return ((data ?? []) as UpcomingGameRow[]).map(mapGame);
 }
+
+/**
+ * True if any of the caller's admin groups has a pending invite. Used by the
+ * Home setup checklist so sending an invite counts before the other person
+ * accepts (member_count stays 1 until then).
+ */
+export async function fetchHasPendingInvites(adminGroupIds: string[]): Promise<boolean> {
+  if (adminGroupIds.length === 0) return false;
+  const { data, error } = await supabase
+    .from('group_invites')
+    .select('id')
+    .eq('status', 'pending')
+    .in('group_id', adminGroupIds)
+    .limit(1);
+  if (error) throw friendlyError(error);
+  return (data ?? []).length > 0;
+}

@@ -133,13 +133,13 @@ function mapGameDetail(row: GameDetailRow): GameDetailModel {
 }
 
 function mapGamePlayer(row: GamePlayerRow, mmrDelta: number | null): GamePlayerModel {
-  const userId = row.profile?.id ?? row.user_id;
+  const userId = row.user_id;
   return {
     id: row.id,
     userId,
-    name: row.profile?.full_name ?? (userId ? 'Unknown player' : 'Deleted user'),
-    avatarUrl: row.profile?.avatar_url ?? null,
-    mmr: row.profile?.global_mmr ?? 1000,
+    name: row.full_name ?? (userId ? 'Unknown player' : 'Deleted user'),
+    avatarUrl: row.avatar_url ?? null,
+    mmr: row.global_mmr ?? 1000,
     mmrDelta,
     paymentStatus: row.payment_status,
     isWaitlisted: row.is_waitlisted,
@@ -190,7 +190,7 @@ export async function createGame(values: CreateGameFormValues): Promise<{ id?: s
     p_max_players: values.maxPlayers,
     p_price_cents: poundsToCents(values.pricePounds),
     p_allow_waitlist: values.allowWaitlist,
-    p_allow_cash: values.allowCash,
+    p_allow_cash: false,
     p_duration_minutes: values.durationMinutes,
     p_home_color: values.homeColor,
     p_away_color: values.awayColor,
@@ -223,7 +223,7 @@ export async function updateGame(gameId: string, values: CreateGameFormValues): 
     p_max_players: values.maxPlayers,
     p_price_cents: poundsToCents(values.pricePounds),
     p_allow_waitlist: values.allowWaitlist,
-    p_allow_cash: values.allowCash,
+    p_allow_cash: false,
     p_duration_minutes: values.durationMinutes,
     p_home_color: values.homeColor,
     p_away_color: values.awayColor,
@@ -267,21 +267,12 @@ export async function fetchGameDetail(gameId: string): Promise<GameDetailModel |
 }
 
 /**
- * The game's player lobby — a direct `game_players` select embedding
- * `profiles` (same pattern as `fetchGroupMembers`), rather than an RPC,
- * since existing RLS already scopes this correctly in one round trip.
- * Waitlisted players sort after confirmed ones, each group joined-earliest first.
+ * The game's player lobby via `get_game_lobby_players()` — name/avatar/MMR
+ * only. Waitlisted players sort after confirmed ones.
  */
 export async function fetchGamePlayers(gameId: string): Promise<GamePlayerModel[]> {
   const [playersResult, eventsResult, gameResult] = await Promise.all([
-    supabase
-      .from('game_players')
-      // game_players has two FKs to profiles (user_id, marked_cash_by) — PostgREST
-      // can't infer which one to embed without naming the constraint explicitly.
-      .select('id, user_id, payment_status, is_waitlisted, joined_at, team, profile:profiles!game_players_user_id_fkey(id, full_name, avatar_url, global_mmr)')
-      .eq('game_id', gameId)
-      .order('is_waitlisted', { ascending: true })
-      .order('joined_at', { ascending: true }),
+    supabase.rpc('get_game_lobby_players', { p_game_id: gameId }),
     supabase.from('mmr_events').select('user_id, delta').eq('game_id', gameId),
     supabase.from('games').select('motm_closed_at').eq('id', gameId).maybeSingle(),
   ]);
@@ -298,8 +289,8 @@ export async function fetchGamePlayers(gameId: string): Promise<GamePlayerModel[
   }
   const motmClosed = !!gameResult.data?.motm_closed_at || totals.size > 0;
 
-  return ((playersResult.data ?? []) as unknown as GamePlayerRow[]).map((row) => {
-    const userId = row.profile?.id ?? row.user_id;
+  return ((playersResult.data ?? []) as GamePlayerRow[]).map((row) => {
+    const userId = row.user_id;
     const mmrDelta = row.is_waitlisted || !motmClosed || !userId ? null : (totals.get(userId) ?? 0);
     return mapGamePlayer(row, mmrDelta);
   });
@@ -321,7 +312,7 @@ export async function leaveGame(gameId: string): Promise<{ error?: string }> {
   if (promotedUserId) {
     try {
       await supabase.functions.invoke('notify-waitlist-promoted', {
-        body: { gameId, userId: promotedUserId },
+        body: { gameId },
       });
     } catch (pushError) {
       recordDiagnosticError('games', pushError);

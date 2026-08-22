@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Animated, Easing, Pressable, View } from 'react-native';
+import { Animated, Easing, Pressable, Text, View } from 'react-native';
 
 import { colors } from '../../../theme/tokens';
 
@@ -12,6 +12,7 @@ type CreateFabProps = {
 type ActionConfig = {
   key: string;
   icon: keyof typeof Ionicons.glyphMap;
+  label: string;
   onPress: () => void;
 };
 
@@ -49,8 +50,8 @@ export function CreateFab({ onCreateGame, onCreateGroup }: CreateFabProps) {
   const backdropOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
 
   const actions: ActionConfig[] = [
-    { key: 'game', icon: 'calendar-outline', onPress: onCreateGame },
-    { key: 'group', icon: 'people-outline', onPress: onCreateGroup },
+    { key: 'game', icon: 'calendar-outline', label: 'Create Game', onPress: onCreateGame },
+    { key: 'group', icon: 'people-outline', label: 'Create Group', onPress: onCreateGroup },
   ];
 
   return (
@@ -83,10 +84,14 @@ export function CreateFab({ onCreateGame, onCreateGroup }: CreateFabProps) {
               <Pressable
                 onPress={() => runAction(action.onPress)}
                 hitSlop={4}
-                className="h-14 w-14 items-center justify-center rounded-2xl bg-white"
+                accessibilityLabel={action.label}
+                className="flex-row items-center gap-3 rounded-full bg-white py-2 pl-2 pr-5"
                 style={SOFT_SHADOW}
               >
-                <Ionicons name={action.icon} size={26} color={colors.primary} />
+                <View className="h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+                  <Ionicons name={action.icon} size={20} color={colors.primary} />
+                </View>
+                <Text className="font-sans-bold text-sm text-ink">{action.label}</Text>
               </Pressable>
             </Animated.View>
           );

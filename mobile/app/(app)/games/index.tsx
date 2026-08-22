@@ -4,11 +4,12 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 
 import { AvatarLightbox } from '../../../src/features/home/components/AvatarLightbox';
 import { BottomNavBar } from '../../../src/features/home/components/BottomNavBar';
+import { CreateFab } from '../../../src/features/home/components/CreateFab';
 import { EmptyState } from '../../../src/features/home/components/EmptyState';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { HomeHeader } from '../../../src/features/home/components/HomeHeader';
 import { GameCardSkeleton } from '../../../src/features/home/components/Skeleton';
-import { useUpcomingGames } from '../../../src/features/home/hooks';
+import { useMyGroups, useUpcomingGames } from '../../../src/features/home/hooks';
 import { formatFullDateLabel, formatGbp, formatUkTime, londonDateKey } from '../../../src/lib/format';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
@@ -31,9 +32,12 @@ function groupByDate(games: GameCardModel[]): { key: string; label: string; game
 export default function GamesScreen() {
   const { profile } = useAuth();
   const gamesQuery = useUpcomingGames();
+  const groupsQuery = useMyGroups();
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const games = gamesQuery.data ?? [];
   const grouped = groupByDate(games);
+  const firstAdminGroupId = (groupsQuery.data ?? []).find((group) => group.role === 'admin')?.id;
+  const hasNoGroups = groupsQuery.isSuccess && (groupsQuery.data ?? []).length === 0;
 
   return (
     <View className="flex-1 bg-background">
@@ -65,6 +69,14 @@ export default function GamesScreen() {
               icon="calendar-outline"
               title="No upcoming games"
               subtitle="Games from groups you belong to will show up here."
+              actionLabel={firstAdminGroupId ? 'Schedule a game' : hasNoGroups ? 'Create a group' : undefined}
+              onPressAction={
+                firstAdminGroupId
+                  ? () => router.push({ pathname: '/games/create', params: { groupId: firstAdminGroupId } })
+                  : hasNoGroups
+                    ? () => router.push('/create-group')
+                    : undefined
+              }
             />
           ) : (
             grouped.map((group) => (
@@ -100,6 +112,11 @@ export default function GamesScreen() {
           )}
         </View>
       </ScrollView>
+
+      <CreateFab
+        onCreateGame={() => router.push('/games/create')}
+        onCreateGroup={() => router.push('/create-group')}
+      />
 
       <BottomNavBar activeKey="games" />
 

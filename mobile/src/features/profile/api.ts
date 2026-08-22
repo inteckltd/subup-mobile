@@ -110,8 +110,20 @@ export async function updateProfileFields(input: {
   return {};
 }
 
-export async function updateMyMobile(mobile: string): Promise<{ error?: string }> {
-  const { data, error } = await supabase.functions.invoke('update-my-mobile', { body: { mobile } });
+export async function requestMobileChangeOtp(mobile: string): Promise<{ error?: string }> {
+  const { data, error } = await supabase.functions.invoke('update-my-mobile', {
+    body: { action: 'request', mobile },
+  });
+  if (error) return { error: friendlyError(error, "Couldn't send a code. Please try again.") };
+  const body = data as { ok?: boolean; error?: string } | null;
+  if (body && body.ok === false && body.error) return { error: body.error };
+  return {};
+}
+
+export async function confirmMobileChange(mobile: string, code: string): Promise<{ error?: string }> {
+  const { data, error } = await supabase.functions.invoke('update-my-mobile', {
+    body: { action: 'confirm', mobile, code },
+  });
   if (error) return { error: friendlyError(error, "Couldn't update your mobile number") };
   const body = data as { ok?: boolean; error?: string } | null;
   if (body && body.ok === false && body.error) return { error: body.error };

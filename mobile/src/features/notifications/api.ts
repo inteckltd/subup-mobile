@@ -43,6 +43,17 @@ export async function fetchMyNotifications(): Promise<NotificationModel[]> {
   }));
 }
 
+export async function markMyNotificationsRead(): Promise<void> {
+  const { error } = await supabase.from('notifications').update({ read_at: new Date().toISOString() }).is('read_at', null);
+  if (error) throw new Error(friendlyError(error, "Couldn't update notifications."));
+}
+
+export async function deleteNotification(id: string): Promise<{ error?: string }> {
+  const { error } = await supabase.from('notifications').delete().eq('id', id);
+  if (error) return { error: friendlyError(error, "Couldn't delete that notification.") };
+  return {};
+}
+
 export async function acceptGroupInvite(inviteId: string): Promise<{ error?: string }> {
   const { error } = await supabase.rpc('accept_group_invite', { p_invite_id: inviteId });
   if (error) return { error: friendlyError(error) };

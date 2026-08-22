@@ -10,7 +10,7 @@ function friendlyError(error: unknown, fallback = GENERIC_ERROR): string {
   console.error('[auth]', error);
   if (error && typeof error === 'object' && 'message' in error) {
     const message = String((error as { message: unknown }).message);
-    if (/rate limit|too many requests/i.test(message)) {
+    if (/rate limit|too many requests|too many attempts/i.test(message)) {
       return "You've tried too many times. Please wait a moment and try again.";
     }
   }
@@ -66,11 +66,12 @@ export async function signUpWithPassword({
 
   // `update`, not `upsert` — the handle_new_user trigger already created
   // this row, and `profiles` has no INSERT RLS policy.
+  // `mobile` is set by handle_new_user from auth.users.phone and is not
+  // client-writable (protect_profile_identity). Confirm it after OTP.
   const { error: profileError } = await supabase
     .from('profiles')
     .update({
       full_name: fullName,
-      mobile,
       email: trimmedEmail,
       terms_accepted_at: new Date().toISOString(),
       terms_version: TERMS_VERSION,
@@ -90,6 +91,46 @@ export async function signUpWithPassword({
 export async function loginWithPassword(mobile: string, password: string): Promise<{ error?: string }> {
   const { error } = await supabase.auth.signInWithPassword({ phone: mobile, password });
   if (error) return { error: friendlyError(error, 'Invalid mobile or password.') };
+  return {};
+}
+
+/**
+ * Sends a reset OTP. Unknown numbers return success so the form cannot
+ * be used to hunt registered mobiles. Rate limits and SMS-provider
+ * failures still surface.
+ */
+export async function requestPasswordReset(mobile: string): Promise<{ error?: string }> {
+  const { error } = await supabase.auth.signInWithOtp({
+    phone: mobile,
+    options: { shouldCreateUser: false },
+  });
+  if (!error) return {};
+  const message = error.message ?? '';
+  if (/signups not allowed|user not found|unable to find|not found/i.test(message)) {
+    return {};
+  }
+  return { error: friendlyError(error) };
+}
+
+export async function verifyResetOtp(mobile: string, token: string): Promise<{ error?: string }> {
+  const { error } = await supabase.auth.verifyOtp({ phone: mobile, token, type: 'sms' });
+  if (error) return { error: friendlyError(error, 'That code is incorrect or has expired.') };
+  return {};
+}
+
+export async function updatePasswordAfterReset(password: string): Promise<{ error?: string }> {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { error: friendlyError(error, "Couldn't update your password. Please try again.") };
+  return {};
+}
+
+export async function requestMobileVerifyOtp(mobile: string): Promise<{ error?: string }> {
+  return requestPasswordReset(mobile);
+}
+
+export async function confirmMyMobile(): Promise<{ error?: string }> {
+  const { error } = await supabase.rpc('confirm_my_mobile');
+  if (error) return { error: friendlyError(error, "Couldn't confirm your mobile number.") };
   return {};
 }
 

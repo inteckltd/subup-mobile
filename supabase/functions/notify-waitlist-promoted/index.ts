@@ -11,7 +11,8 @@
 //   2. Confirm the caller can see the game (group member) via that same
 //      RLS-scoped client.
 //   3. Only then create a service-role client, used only to read
-//      push_tokens and the already-inserted waitlist_promoted row.
+//      push_tokens and the newest waitlist_promoted row for that game
+//      (last 2 minutes). The client must not choose the recipient.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { captureEdgeError } from '../_shared/sentry.ts';
@@ -57,20 +58,15 @@ Deno.serve(async (req) => {
   }
 
   let gameId: string | undefined;
-  let userId: string | undefined;
   try {
     const body = await req.json();
     gameId = body?.gameId;
-    userId = body?.userId;
   } catch {
     return jsonResponse({ ok: false, error: 'Invalid request body' }, 400);
   }
 
   if (!gameId || typeof gameId !== 'string') {
     return jsonResponse({ ok: false, error: 'gameId is required' }, 400);
-  }
-  if (!userId || typeof userId !== 'string') {
-    return jsonResponse({ ok: false, error: 'userId is required' }, 400);
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -110,12 +106,13 @@ Deno.serve(async (req) => {
 
   const serviceClient = createClient(supabaseUrl, serviceRoleKey);
 
+  const since = new Date(Date.now() - 2 * 60 * 1000).toISOString();
   const { data: notifications, error: notificationsError } = await serviceClient
     .from('notifications')
-    .select('user_id, title, body, data')
+    .select('user_id, title, body, data, created_at')
     .eq('type', 'waitlist_promoted')
-    .eq('user_id', userId)
     .contains('data', { gameId })
+    .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(1);
 
@@ -130,10 +127,11 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: true, notified: 0, pushed: 0 });
   }
 
+  const recipientId = rows[0].user_id;
   const { data: tokenRows, error: tokensError } = await serviceClient
     .from('push_tokens')
     .select('user_id, token')
-    .eq('user_id', userId);
+    .eq('user_id', recipientId);
 
   if (tokensError) {
     console.error('[notify-waitlist-promoted] push_tokens lookup failed', tokensError);

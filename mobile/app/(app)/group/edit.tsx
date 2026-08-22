@@ -14,10 +14,10 @@ import { updateGroup, uploadGroupCoverImage } from '../../../src/features/groups
 import { CoverImagePicker } from '../../../src/features/groups/components/CoverImagePicker';
 import { FormSection } from '../../../src/features/groups/components/FormSection';
 import { LockHoursSelector } from '../../../src/features/groups/components/LockHoursSelector';
-import { SportSelector } from '../../../src/features/groups/components/SportSelector';
 import { Stepper } from '../../../src/features/groups/components/Stepper';
 import { WeekdaySelector } from '../../../src/features/groups/components/WeekdaySelector';
 import { createGroupSchema, type CreateGroupFormValues } from '../../../src/features/groups/schemas';
+import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
 
@@ -41,7 +41,7 @@ export default function EditGroupScreen() {
     control,
     handleSubmit,
     reset,
-    formState: { errors, isValid },
+    formState: { errors, isValid, isDirty },
   } = useForm<CreateGroupFormValues>({
     resolver: zodResolver(createGroupSchema),
     mode: 'onChange',
@@ -74,6 +74,8 @@ export default function EditGroupScreen() {
     });
   }, [group, reset, defaultHour, defaultMinute]);
 
+  const { allowLeave } = useUnsavedChangesGuard(isDirty);
+
   const onSubmit = handleSubmit(async (values) => {
     if (!session || !groupId || !group) return;
     setSubmitError(null);
@@ -99,6 +101,7 @@ export default function EditGroupScreen() {
 
     await queryClient.invalidateQueries({ queryKey: ['group', groupId] });
     await queryClient.invalidateQueries({ queryKey: ['home', 'my-groups', session.user.id] });
+    allowLeave();
     router.back();
   });
 
@@ -176,11 +179,6 @@ export default function EditGroupScreen() {
               control={control}
               name="lockHours"
               render={({ field }) => <LockHoursSelector value={field.value} onChange={field.onChange} />}
-            />
-            <Controller
-              control={control}
-              name="sport"
-              render={({ field }) => <SportSelector value={field.value} onChange={field.onChange} />}
             />
           </FormSection>
 

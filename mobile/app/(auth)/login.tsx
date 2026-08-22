@@ -13,7 +13,7 @@ import { normalizeUkMobile } from '../../src/lib/phone';
 import { useAuth } from '../../src/providers/AuthProvider';
 
 export default function LoginScreen() {
-  const { refreshProfile } = useAuth();
+  const { refreshProfile, endPasswordRecovery } = useAuth();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -44,6 +44,7 @@ export default function LoginScreen() {
       return;
     }
 
+    endPasswordRecovery();
     await refreshProfile();
     router.replace('/');
   });
@@ -62,7 +63,7 @@ export default function LoginScreen() {
           <TextField
             label="Phone number"
             icon="call-outline"
-            placeholder="Mobile number"
+            placeholder="07912 345678"
             keyboardType="phone-pad"
             textContentType="telephoneNumber"
             value={field.value}
@@ -89,6 +90,10 @@ export default function LoginScreen() {
           />
         )}
       />
+
+      <Link href="/forgot-password" className="self-end">
+        <Text className="font-sans-bold text-sm text-primary">Forgot password?</Text>
+      </Link>
 
       {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
 

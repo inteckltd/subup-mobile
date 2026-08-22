@@ -7,6 +7,12 @@ type MemberCardProps = {
   member: GroupMemberModel;
   /** Shows a small "Admin" tag next to the name — used on the full Members tab, not the Upcoming preview. */
   showRoleBadge?: boolean;
+  /**
+   * Grow to fill a 2-column row (Upcoming "Active Members" preview).
+   * Leave off on the Members tab — `flex-1` in a column shrinks the cards
+   * when the Invited section below remounts (e.g. after cancelling an SMS invite).
+   */
+  fillRow?: boolean;
   onPress?: () => void;
 };
 
@@ -14,7 +20,7 @@ type MemberCardProps = {
  * Shared card design for both the Upcoming tab's "Active Members" preview
  * grid and the full Members tab list — avatar + name + MMR.
  */
-export function MemberCard({ member, showRoleBadge = false, onPress }: MemberCardProps) {
+export function MemberCard({ member, showRoleBadge = false, fillRow = false, onPress }: MemberCardProps) {
   const content = (
     <>
       <Avatar uri={member.avatarUrl} name={member.name} size={44} />
@@ -34,13 +40,17 @@ export function MemberCard({ member, showRoleBadge = false, onPress }: MemberCar
     </>
   );
 
+  const layoutClass = fillRow
+    ? 'flex-1 flex-row items-center gap-3 rounded-2xl border border-border bg-white p-3'
+    : 'w-full flex-row items-center gap-3 rounded-2xl border border-border bg-white p-3';
+
   if (onPress) {
     return (
-      <Pressable onPress={onPress} className="flex-1 flex-row items-center gap-3 rounded-2xl border border-border bg-white p-3">
+      <Pressable onPress={onPress} className={layoutClass}>
         {content}
       </Pressable>
     );
   }
 
-  return <View className="flex-1 flex-row items-center gap-3 rounded-2xl border border-border bg-white p-3">{content}</View>;
+  return <View className={layoutClass}>{content}</View>;
 }

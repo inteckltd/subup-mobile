@@ -45,10 +45,10 @@ function mapGroupDetail(row: GroupDetailRow): GroupDetailModel {
 function mapGroupMember(row: GroupMemberRow): GroupMemberModel {
   return {
     id: row.id,
-    userId: row.profile?.id ?? '',
-    name: row.profile?.full_name ?? 'Unknown player',
-    avatarUrl: row.profile?.avatar_url ?? null,
-    mmr: row.profile?.global_mmr ?? 1000,
+    userId: row.user_id,
+    name: row.full_name ?? 'Unknown player',
+    avatarUrl: row.avatar_url,
+    mmr: row.global_mmr ?? 1000,
     role: row.role,
     joinedAt: row.joined_at,
   };
@@ -94,20 +94,13 @@ export async function fetchGroupDetail(groupId: string): Promise<GroupDetailMode
 }
 
 /**
- * The group's roster — a direct `group_members` select embedding `profiles`
- * via the `user_id` foreign key, rather than an RPC, since existing RLS
- * (`is_group_member` on group_members, `shares_group_with` on profiles)
- * already scopes this correctly in one round trip.
+ * The group's roster via `get_group_members()` — name/avatar/MMR only so
+ * mates cannot read each other's mobile or email.
  */
 export async function fetchGroupMembers(groupId: string): Promise<GroupMemberModel[]> {
-  const { data, error } = await supabase
-    .from('group_members')
-    .select('id, role, joined_at, profile:profiles(id, full_name, avatar_url, global_mmr)')
-    .eq('group_id', groupId)
-    .order('role', { ascending: true })
-    .order('joined_at', { ascending: true });
+  const { data, error } = await supabase.rpc('get_group_members', { p_group_id: groupId });
   if (error) throw friendlyError(error);
-  return ((data ?? []) as unknown as GroupMemberRow[]).map(mapGroupMember);
+  return ((data ?? []) as GroupMemberRow[]).map(mapGroupMember);
 }
 
 /**
@@ -135,6 +128,7 @@ const MUTATION_MESSAGES = [
   'You are not a member of this group',
   'That person is not a member of this group',
   'You are already an admin',
+  'Too many attempts',
 ];
 
 function mutationError(error: unknown, fallback: string): string {
@@ -153,8 +147,9 @@ export async function fetchGroupPendingInvites(groupId: string): Promise<GroupPe
   return ((data ?? []) as GroupPendingInviteRow[]).map((row) => ({
     id: row.invite_id,
     userId: row.invited_user_id,
-    name: row.full_name ?? 'Unknown player',
+    name: row.awaiting_signup ? 'Waiting to download PitchIn' : (row.full_name ?? 'Unknown player'),
     avatarUrl: row.avatar_url,
+    awaitingSignup: row.awaiting_signup,
     createdAt: row.created_at,
   }));
 }

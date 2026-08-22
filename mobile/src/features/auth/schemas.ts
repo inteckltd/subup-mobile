@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 import { isValidUkMobile } from '../../lib/phone';
 
-export const TERMS_VERSION = '1.0';
-export const PRIVACY_VERSION = '1.0';
+export const TERMS_VERSION = '1.1';
+export const PRIVACY_VERSION = '1.1';
 
 const ukMobile = z
   .string()
@@ -36,3 +36,21 @@ export const loginSchema = z.object({
 });
 
 export type LoginFormValues = z.infer<typeof loginSchema>;
+
+export const forgotPasswordSchema = z.object({
+  mobile: ukMobile,
+});
+
+export type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
+
+export const resetPasswordSchema = z
+  .object({
+    password,
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords don't match",
+    path: ['confirmPassword'],
+  });
+
+export type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>;

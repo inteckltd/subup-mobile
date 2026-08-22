@@ -79,9 +79,12 @@ export function useGameDetailRefresh(gameId: string | undefined) {
 /**
  * Drives Create Game's submit — manual async + `useState`, no
  * `useMutation`, matching this codebase's existing convention (see
- * `app/(app)/create-group.tsx`).
+ * `app/(app)/create-group.tsx`). Invalidates Home/group lists so the new
+ * game shows up without a pull-to-refresh.
  */
 export function useCreateGame() {
+  const queryClient = useQueryClient();
+  const { session } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,13 +97,22 @@ export function useCreateGame() {
       setError(result.error);
       return null;
     }
+    if (session) {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['home'] }),
+        queryClient.invalidateQueries({ queryKey: ['games'] }),
+        queryClient.invalidateQueries({ queryKey: ['group', values.groupId] }),
+      ]);
+    }
     return result.id ?? null;
-  }, []);
+  }, [queryClient, session]);
 
   return { submit, submitting, error };
 }
 
 export function useUpdateGame() {
+  const queryClient = useQueryClient();
+  const { session } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,8 +125,16 @@ export function useUpdateGame() {
       setError(result.error);
       return false;
     }
+    if (session) {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['home'] }),
+        queryClient.invalidateQueries({ queryKey: ['games'] }),
+        queryClient.invalidateQueries({ queryKey: ['group', values.groupId] }),
+        queryClient.invalidateQueries({ queryKey: ['game', gameId] }),
+      ]);
+    }
     return true;
-  }, []);
+  }, [queryClient, session]);
 
   return { submit, submitting, error };
 }

@@ -27,9 +27,10 @@ export type GroupMemberModel = {
 
 export type GroupPendingInviteModel = {
   id: string;
-  userId: string;
+  userId: string | null;
   name: string;
   avatarUrl: string | null;
+  awaitingSignup: boolean;
   createdAt: string;
 };
 

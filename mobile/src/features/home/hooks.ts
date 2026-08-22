@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 
 import { useAuth } from '../../providers/AuthProvider';
-import { fetchMyGroups, fetchUpcomingGames } from './api';
+import { fetchHasPendingInvites, fetchMyGroups, fetchUpcomingGames } from './api';
 
 /**
  * Query keys include the signed-in user's id so cached data can never leak
@@ -30,7 +30,17 @@ export function useUpcomingGames() {
   });
 }
 
-/** Drives Home's pull-to-refresh: re-fetches both queries in parallel. */
+export function useHasPendingInvites(adminGroupIds: string[]) {
+  const { session } = useAuth();
+  const idsKey = [...adminGroupIds].sort().join(',');
+  return useQuery({
+    queryKey: ['home', 'pending-invites', session?.user.id, idsKey],
+    queryFn: () => fetchHasPendingInvites(adminGroupIds),
+    enabled: !!session && adminGroupIds.length > 0,
+  });
+}
+
+/** Drives Home's pull-to-refresh: re-fetches groups, games, and pending invites. */
 export function useHomeRefresh() {
   const queryClient = useQueryClient();
   const { session } = useAuth();
@@ -43,6 +53,7 @@ export function useHomeRefresh() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['home', 'my-groups', session.user.id] }),
         queryClient.invalidateQueries({ queryKey: ['home', 'upcoming-games', session.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ['home', 'pending-invites', session.user.id] }),
       ]);
     } finally {
       setRefreshing(false);

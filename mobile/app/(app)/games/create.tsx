@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +24,7 @@ import {
 } from '../../../src/features/games/schemas';
 import { FormSection } from '../../../src/features/groups/components/FormSection';
 import { Stepper } from '../../../src/features/groups/components/Stepper';
+import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
 import { colors } from '../../../src/theme/tokens';
 
 function formatDateInput(date: Date): string {
@@ -46,6 +47,7 @@ export default function CreateGameScreen() {
   const groups = groupsQuery.data ?? [];
   const lockHoursRef = useRef<number | null>(null);
   const didPrefillEdit = useRef(false);
+  const [showMore, setShowMore] = useState(!!editId);
 
   const {
     control,
@@ -53,7 +55,7 @@ export default function CreateGameScreen() {
     setValue,
     watch,
     trigger,
-    formState: { errors, isValid },
+    formState: { errors, isValid, isDirty },
   } = useForm<CreateGameFormValues>({
     resolver: async (values, context, options) =>
       zodResolver(createGameSchemaForLock(lockHoursRef.current))(values, context, options),
@@ -65,6 +67,7 @@ export default function CreateGameScreen() {
   const selectedGroup = groups.find((group) => group.id === watchedGroupId);
   lockHoursRef.current = selectedGroup?.lockHours ?? editQuery.data?.cancelIfMinNotMetHours ?? null;
   const submitError = createError || updateError;
+  const { allowLeave } = useUnsavedChangesGuard(isDirty);
 
   // Preselects the group passed in from Group Details' "Create game" CTA,
   // once the creatable-groups list has loaded and confirms the caller
@@ -116,7 +119,6 @@ export default function CreateGameScreen() {
     setValue('homeColor', teamColorById(game.homeColor).id);
     setValue('awayColor', teamColorById(game.awayColor).id);
     setValue('allowWaitlist', game.allowWaitlist);
-    setValue('allowCash', game.allowCash);
   }, [isEditing, editQuery.data, setValue]);
 
   useEffect(() => {
@@ -126,11 +128,15 @@ export default function CreateGameScreen() {
   const onSubmit = handleSubmit(async (values) => {
     if (isEditing && editId) {
       const ok = await updateSubmit(editId, values);
-      if (ok) router.replace(`/games/${editId}`);
+      if (ok) {
+        allowLeave();
+        router.replace(`/games/${editId}`);
+      }
       return;
     }
     const gameId = await submit(values);
     if (gameId) {
+      allowLeave();
       router.replace(`/games/${gameId}`);
     }
   });
@@ -243,7 +249,7 @@ export default function CreateGameScreen() {
                 <TextField
                   label="Venue address (optional)"
                   icon="map-outline"
-                  placeholder="Field 2, Centennial Park"
+                  placeholder="Pitch 2, Powerleague Shoreditch"
                   autoCapitalize="words"
                   value={field.value}
                   onChangeText={field.onChange}
@@ -281,7 +287,8 @@ export default function CreateGameScreen() {
             {errors.maxPlayers ? <Text className="font-sans-medium text-xs text-danger">{errors.maxPlayers.message}</Text> : null}
 
             <View className="w-full gap-1.5 border-t border-[#F9FAFB] pt-3">
-              <Text className="font-sans-bold text-xs text-muted">Price per player</Text>
+              <Text className="font-sans-bold text-xs text-muted">Pitch cost per player</Text>
+              <Text className="font-sans text-[10px] text-muted">Shown to players — pay on the day. Card pay comes later.</Text>
               <Controller
                 control={control}
                 name="pricePounds"
@@ -308,60 +315,54 @@ export default function CreateGameScreen() {
             </View>
           </FormSection>
 
-          <FormSection title="Team colours">
-            <Text className="font-sans text-xs text-muted">
-              So players can tell teams apart on the day — used when the score gets entered too.
-            </Text>
-            <View className="w-full gap-1.5">
-              <Text className="font-sans-bold text-xs text-muted">Home</Text>
-              <Controller
-                control={control}
-                name="homeColor"
-                render={({ field }) => <TeamColorSelector value={field.value} onChange={field.onChange} />}
-              />
-            </View>
-            <View className="w-full gap-1.5 border-t border-[#F9FAFB] pt-3">
-              <Text className="font-sans-bold text-xs text-muted">Away</Text>
-              <Controller
-                control={control}
-                name="awayColor"
-                render={({ field }) => <TeamColorSelector value={field.value} onChange={field.onChange} />}
-              />
-            </View>
-            {errors.awayColor ? <Text className="font-sans-medium text-xs text-danger">{errors.awayColor.message}</Text> : null}
-          </FormSection>
+          <Pressable onPress={() => setShowMore((open) => !open)} className="flex-row items-center justify-between py-1">
+            <Text className="font-sans-bold text-sm text-primary">{showMore ? 'Hide options' : 'More options'}</Text>
+            <Ionicons name={showMore ? 'chevron-up' : 'chevron-down'} size={16} color={colors.primary} />
+          </Pressable>
 
-          <View className="w-full rounded-2xl bg-white px-4 py-1" style={{ shadowColor: '#000000', shadowOpacity: 0.05, shadowRadius: 1, shadowOffset: { width: 0, height: 1 } }}>
-            <Controller
-              control={control}
-              name="allowWaitlist"
-              render={({ field }) => (
-                <ToggleRow
-                  icon="people-outline"
-                  iconBg="#EEF2FF"
-                  iconColor="#4338CA"
-                  label="Allow waitlist"
-                  value={field.value}
-                  onChange={field.onChange}
+          {showMore ? (
+            <>
+              <FormSection title="Team colours">
+                <Text className="font-sans text-xs text-muted">
+                  So players can tell teams apart on the day — used when the score gets entered too.
+                </Text>
+                <View className="w-full gap-1.5">
+                  <Text className="font-sans-bold text-xs text-muted">Home</Text>
+                  <Controller
+                    control={control}
+                    name="homeColor"
+                    render={({ field }) => <TeamColorSelector value={field.value} onChange={field.onChange} />}
+                  />
+                </View>
+                <View className="w-full gap-1.5 border-t border-[#F9FAFB] pt-3">
+                  <Text className="font-sans-bold text-xs text-muted">Away</Text>
+                  <Controller
+                    control={control}
+                    name="awayColor"
+                    render={({ field }) => <TeamColorSelector value={field.value} onChange={field.onChange} />}
+                  />
+                </View>
+                {errors.awayColor ? <Text className="font-sans-medium text-xs text-danger">{errors.awayColor.message}</Text> : null}
+              </FormSection>
+
+              <View className="w-full rounded-2xl bg-white px-4 py-1" style={{ shadowColor: '#000000', shadowOpacity: 0.05, shadowRadius: 1, shadowOffset: { width: 0, height: 1 } }}>
+                <Controller
+                  control={control}
+                  name="allowWaitlist"
+                  render={({ field }) => (
+                    <ToggleRow
+                      icon="people-outline"
+                      iconBg="#EEF2FF"
+                      iconColor="#4338CA"
+                      label="Allow waitlist"
+                      value={field.value}
+                      onChange={field.onChange}
+                    />
+                  )}
                 />
-              )}
-            />
-            <Controller
-              control={control}
-              name="allowCash"
-              render={({ field }) => (
-                <ToggleRow
-                  icon="wallet-outline"
-                  iconBg="#ECFDF5"
-                  iconColor="#059669"
-                  label="Allow cash payments"
-                  value={field.value}
-                  onChange={field.onChange}
-                  bordered
-                />
-              )}
-            />
-          </View>
+              </View>
+            </>
+          ) : null}
 
           {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
         </ScrollView>

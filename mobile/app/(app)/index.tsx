@@ -1,5 +1,6 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { router, useFocusEffect, type Href } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, View } from 'react-native';
 
 import { AvatarLightbox } from '../../src/features/home/components/AvatarLightbox';
@@ -12,16 +13,62 @@ import { GroupCard } from '../../src/features/home/components/GroupCard';
 import { HomeHeader } from '../../src/features/home/components/HomeHeader';
 import { SectionHeader } from '../../src/features/home/components/SectionHeader';
 import { GameCardSkeleton, GroupCardSkeleton } from '../../src/features/home/components/Skeleton';
-import { useHomeRefresh, useMyGroups, useUpcomingGames } from '../../src/features/home/hooks';
+import { useHasPendingInvites, useHomeRefresh, useMyGroups, useUpcomingGames } from '../../src/features/home/hooks';
+import { SetupChecklist } from '../../src/features/onboarding/components/SetupChecklist';
+import { consumeExplainerPresentation, useOnboardingFlags } from '../../src/features/onboarding/hooks';
+import { getSetupProgress } from '../../src/features/onboarding/progress';
 import { useAuth } from '../../src/providers/AuthProvider';
 import { colors } from '../../src/theme/tokens';
 
+const HOME_GROUPS_PREVIEW = 3;
+
 export default function HomeScreen() {
-  const { profile } = useAuth();
+  const { session, profile } = useAuth();
+  const queryClient = useQueryClient();
   const groupsQuery = useMyGroups();
   const gamesQuery = useUpcomingGames();
   const { refreshing, refresh } = useHomeRefresh();
+  const { ready, explainerSeen, checklistDismissed, dismissChecklist, refetch } = useOnboardingFlags(session?.user.id);
+  const adminGroupIds = (groupsQuery.data ?? []).filter((group) => group.role === 'admin').map((group) => group.id);
+  const pendingInvitesQuery = useHasPendingInvites(adminGroupIds);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const skipHomeRefetchOnFirstFocus = useRef(true);
+
+  const groups = groupsQuery.data ?? [];
+  const games = gamesQuery.data ?? [];
+  const hasPendingInvite = pendingInvitesQuery.data === true;
+  const progress = getSetupProgress(groups, games.length, hasPendingInvite);
+  const pendingInvitesReady = adminGroupIds.length === 0 || pendingInvitesQuery.isSuccess || pendingInvitesQuery.isError;
+  const showChecklist =
+    ready &&
+    !checklistDismissed &&
+    groupsQuery.isSuccess &&
+    !gamesQuery.isPending &&
+    pendingInvitesReady &&
+    progress.isOrganiser &&
+    !progress.allComplete &&
+    (explainerSeen || groups.length > 0);
+
+  useFocusEffect(
+    useCallback(() => {
+      refetch();
+      if (skipHomeRefetchOnFirstFocus.current) {
+        skipHomeRefetchOnFirstFocus.current = false;
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: ['home'] });
+    }, [refetch, queryClient]),
+  );
+
+  useEffect(() => {
+    const userId = session?.user.id;
+    if (!userId || !ready || explainerSeen) return;
+    if (!groupsQuery.isSuccess || groups.length > 0) return;
+    if (!consumeExplainerPresentation(userId)) return;
+    router.push('/onboarding');
+  }, [session?.user.id, ready, explainerSeen, groupsQuery.isSuccess, groups.length]);
+
+  const firstAdminGroupId = progress.firstAdminGroupId;
 
   return (
     <View className="flex-1 bg-background">
@@ -40,6 +87,25 @@ export default function HomeScreen() {
         />
 
         <View className="gap-10 px-5 pt-6">
+          {showChecklist ? (
+            <SetupChecklist
+              progress={progress}
+              onDismiss={() => void dismissChecklist()}
+              onCreateGroup={() => router.push('/create-group')}
+              onInvite={() => {
+                if (firstAdminGroupId) router.push(`/group/invite?groupId=${firstAdminGroupId}`);
+                else router.push('/create-group');
+              }}
+              onScheduleGame={() => {
+                if (firstAdminGroupId) {
+                  router.push({ pathname: '/games/create', params: { groupId: firstAdminGroupId } });
+                } else {
+                  router.push('/create-group');
+                }
+              }}
+            />
+          ) : null}
+
           <View className="w-full gap-4">
             <SectionHeader
               title="Upcoming Games"
@@ -55,15 +121,21 @@ export default function HomeScreen() {
               </ScrollView>
             ) : gamesQuery.isError ? (
               <ErrorState message="Couldn't load your upcoming games." onRetry={() => gamesQuery.refetch()} />
-            ) : (gamesQuery.data ?? []).length === 0 ? (
+            ) : games.length === 0 ? (
               <EmptyState
                 icon="calendar-outline"
                 title="No upcoming games yet"
                 subtitle="Games from your groups will show up here once they're scheduled."
+                actionLabel={firstAdminGroupId ? 'Schedule a game' : undefined}
+                onPressAction={
+                  firstAdminGroupId
+                    ? () => router.push({ pathname: '/games/create', params: { groupId: firstAdminGroupId } })
+                    : undefined
+                }
               />
             ) : (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 16 }}>
-                {(gamesQuery.data ?? []).map((game) => (
+                {games.map((game) => (
                   <GameCard
                     key={game.id}
                     game={game}
@@ -76,7 +148,12 @@ export default function HomeScreen() {
           </View>
 
           <View className="w-full gap-4">
-            <SectionHeader title="My Groups" />
+            <SectionHeader
+              title="My Groups"
+              actionLabel="See all"
+              actionVariant="pill"
+              onPressAction={() => router.replace('/groups' as Href)}
+            />
 
             {groupsQuery.isPending ? (
               <View className="w-full gap-3">
@@ -85,15 +162,17 @@ export default function HomeScreen() {
               </View>
             ) : groupsQuery.isError ? (
               <ErrorState message="Couldn't load your groups." onRetry={() => groupsQuery.refetch()} />
-            ) : (groupsQuery.data ?? []).length === 0 ? (
+            ) : groups.length === 0 ? (
               <EmptyState
                 icon="people-outline"
                 title="No groups yet"
                 subtitle="Join or create a group to start organising games with your squad."
+                actionLabel="Create a group"
+                onPressAction={() => router.push('/create-group')}
               />
             ) : (
               <View className="w-full gap-3">
-                {(groupsQuery.data ?? []).map((group, index) => (
+                {groups.slice(0, HOME_GROUPS_PREVIEW).map((group, index) => (
                   <GroupCard
                     key={group.id}
                     group={group}

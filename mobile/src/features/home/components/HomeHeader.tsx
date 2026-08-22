@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '../../../theme/tokens';
 import type { Profile } from '../../../types';
+import { useUnreadNotificationCount } from '../../notifications/hooks';
 import { Avatar } from './Avatar';
 
 type HomeHeaderProps = {
@@ -33,7 +34,9 @@ export function HomeHeader({
   onPressSettings,
 }: HomeHeaderProps) {
   const insets = useSafeAreaInsets();
+  const unreadCount = useUnreadNotificationCount();
   const firstName = profile?.full_name?.trim().split(' ')[0] || 'there';
+  const unreadLabel = unreadCount > 9 ? '9+' : String(unreadCount);
 
   const smallAvatar = (
     <Avatar uri={profile?.avatar_url} name={profile?.full_name} size={40} ringColor={colors.accent} ringWidth={2} />
@@ -50,14 +53,25 @@ export function HomeHeader({
         </View>
 
         <View className="flex-row items-center gap-3">
-          <Pressable
-            onPress={onPressNotifications}
-            hitSlop={8}
-            className="h-10 w-10 items-center justify-center overflow-hidden rounded-full"
-          >
-            <BlurView intensity={30} tint="light" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
-            <Ionicons name="notifications-outline" size={18} color={colors.white} />
-          </Pressable>
+          <View>
+            <Pressable
+              onPress={onPressNotifications}
+              hitSlop={8}
+              accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+              className="h-10 w-10 items-center justify-center overflow-hidden rounded-full"
+            >
+              <BlurView intensity={30} tint="light" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+              <Ionicons name="notifications-outline" size={18} color={colors.white} />
+            </Pressable>
+            {unreadCount > 0 ? (
+              <View
+                pointerEvents="none"
+                className="absolute -right-0.5 -top-0.5 min-h-[16px] min-w-[16px] items-center justify-center rounded-full bg-danger px-1"
+              >
+                <Text className="font-sans-extrabold text-[9px] text-white">{unreadLabel}</Text>
+              </View>
+            ) : null}
+          </View>
           {onPressSettings ? (
             <Pressable
               onPress={onPressSettings}

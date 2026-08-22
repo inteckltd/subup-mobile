@@ -13,8 +13,19 @@ type AuthContextValue = {
   profile: Profile | null;
   /** True whenever a profile row is present and has a mobile number recorded. */
   hasMobile: boolean;
+  /** True after the one-time SMS confirm (grandfathered for existing users). */
+  mobileVerified: boolean;
   /** True when stored legal versions match the copy currently in the app. */
   legalCurrent: boolean;
+  /**
+   * True while the forgot-password flow is in progress. Keeps the user in
+   * `(auth)` after `verifyOtp` creates a session, until they set a new password.
+   */
+  passwordRecovery: boolean;
+  /** E.164 mobile collected on the forgot-password screen, used by OTP verify. */
+  recoveryMobile: string | null;
+  beginPasswordRecovery: (mobile: string) => void;
+  endPasswordRecovery: () => void;
   /** Re-fetches the current user's profile row from the database. */
   refreshProfile: () => Promise<Profile | null>;
   signOut: () => Promise<void>;
@@ -39,7 +50,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [initializing, setInitializing] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const [recoveryMobile, setRecoveryMobile] = useState<string | null>(null);
   const currentUserId = useRef<string | null>(null);
+
+  const beginPasswordRecovery = useCallback((mobile: string) => {
+    setPasswordRecovery(true);
+    setRecoveryMobile(mobile);
+  }, []);
+
+  const endPasswordRecovery = useCallback(() => {
+    setPasswordRecovery(false);
+    setRecoveryMobile(null);
+  }, []);
 
   const refreshProfile = useCallback(async (): Promise<Profile | null> => {
     const userId = currentUserId.current;
@@ -83,6 +106,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         currentUserId.current = null;
         setProfile(null);
         setSentryUser(null);
+        setPasswordRecovery(false);
+        setRecoveryMobile(null);
         return;
       }
 
@@ -106,6 +131,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     setProfile(null);
     setSentryUser(null);
+    setPasswordRecovery(false);
+    setRecoveryMobile(null);
   }, []);
 
   const value: AuthContextValue = {
@@ -113,7 +140,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     session,
     profile,
     hasMobile: !!profile?.mobile,
+    mobileVerified: !!profile?.mobile_verified_at,
     legalCurrent: isLegalCurrent(profile),
+    passwordRecovery,
+    recoveryMobile,
+    beginPasswordRecovery,
+    endPasswordRecovery,
     refreshProfile,
     signOut,
   };

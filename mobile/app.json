@@ -18,7 +18,7 @@
     "android": {
       "package": "com.inteck.pitchin",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0B6E4F",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -33,7 +33,15 @@
       "expo-router",
       "expo-secure-store",
       "expo-font",
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#F4F6F5"
+        }
+      ],
       "expo-image",
       [
         "expo-image-picker",

@@ -1,14 +1,14 @@
 // PitchIn — notify-group-invite Edge Function.
 //
-// Best-effort push for a group invite the client just created via
-// `invite_group_member`. In-app `notifications` rows are already inserted
-// inside that RPC — this function only reads them and sends Expo push.
-// A failure here never affects whether the invite exists.
+// Best-effort delivery for a group invite the client just created via
+// `invite_group_member`. Existing users get Expo push (inbox row already
+// inserted by the RPC). Unknown mobiles get one Twilio SMS with a download
+// link. A failure here never affects whether the invite exists.
 //
 // Security (same model as notify-game-created):
 //   1. Verify the caller's JWT with an anon-key client.
 //   2. Confirm the caller can see the invite (admin / inviter RLS).
-//   3. Only then use service_role to read the invitee's push_tokens.
+//   3. Only then use service_role to read invitee tokens / send SMS.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { captureEdgeError } from '../_shared/sentry.ts';
@@ -26,6 +26,35 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+function firstName(fullName: string | null | undefined): string {
+  const part = fullName?.trim().split(/\s+/)[0];
+  return part || 'A teammate';
+}
+
+async function sendInviteSms(to: string, body: string): Promise<{ ok: boolean; error?: string }> {
+  const sid = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const token = Deno.env.get('TWILIO_AUTH_TOKEN');
+  const from = Deno.env.get('TWILIO_FROM_NUMBER');
+  if (!sid || !token || !from) {
+    return { ok: false, error: 'Missing TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER' };
+  }
+
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${btoa(`${sid}:${token}`)}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ To: to, From: from, Body: body }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    return { ok: false, error: `Twilio ${response.status}: ${detail}` };
+  }
+  return { ok: true };
 }
 
 Deno.serve(async (req) => {
@@ -90,6 +119,53 @@ Deno.serve(async (req) => {
   }
 
   const serviceClient = createClient(supabaseUrl, serviceRoleKey);
+
+  const { data: inviteRow, error: inviteRowError } = await serviceClient
+    .from('group_invites')
+    .select('id, group_id, invited_user_id, mobile, invited_by, sms_sent_at')
+    .eq('id', inviteId)
+    .maybeSingle();
+
+  if (inviteRowError) {
+    console.error('[notify-group-invite] service invite lookup failed', inviteRowError);
+    await captureEdgeError('notify-group-invite', inviteRowError);
+    return jsonResponse({ ok: false, error: 'Could not load invite' }, 500);
+  }
+
+  if (inviteRow && !inviteRow.invited_user_id) {
+    if (inviteRow.sms_sent_at) {
+      return jsonResponse({ ok: true, notified: 0, pushed: 0, sms: false, alreadySent: true });
+    }
+
+    const inviteAppUrl = Deno.env.get('INVITE_APP_URL');
+    if (!inviteRow.mobile || !inviteAppUrl) {
+      const err = new Error('Invite SMS skipped: missing mobile or INVITE_APP_URL');
+      console.error('[notify-group-invite]', err.message);
+      await captureEdgeError('notify-group-invite', err);
+      return jsonResponse({ ok: true, notified: 0, pushed: 0, sms: false, error: err.message });
+    }
+
+    const [{ data: group }, { data: inviter }] = await Promise.all([
+      serviceClient.from('groups').select('name').eq('id', inviteRow.group_id).maybeSingle(),
+      serviceClient.from('profiles').select('full_name').eq('id', inviteRow.invited_by).maybeSingle(),
+    ]);
+
+    const groupName = group?.name ?? 'a group';
+    const body = `${firstName(inviter?.full_name)} invited you to ${groupName} on PitchIn. Download the app: ${inviteAppUrl}`;
+    const sms = await sendInviteSms(inviteRow.mobile, body);
+    if (!sms.ok) {
+      console.error('[notify-group-invite] Twilio SMS failed', sms.error);
+      await captureEdgeError('notify-group-invite', new Error(sms.error ?? 'Twilio SMS failed'));
+      return jsonResponse({ ok: true, notified: 0, pushed: 0, sms: false, error: sms.error });
+    }
+
+    await serviceClient
+      .from('group_invites')
+      .update({ sms_sent_at: new Date().toISOString() })
+      .eq('id', inviteId);
+
+    return jsonResponse({ ok: true, notified: 0, pushed: 0, sms: true });
+  }
 
   const { data: notifications, error: notificationsError } = await serviceClient
     .from('notifications')

@@ -14,7 +14,7 @@ import { normalizeUkMobile } from '../../src/lib/phone';
 import { useAuth } from '../../src/providers/AuthProvider';
 
 export default function SignUpScreen() {
-  const { refreshProfile } = useAuth();
+  const { refreshProfile, endPasswordRecovery } = useAuth();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -53,6 +53,7 @@ export default function SignUpScreen() {
       return;
     }
 
+    endPasswordRecovery();
     await refreshProfile();
     router.replace('/');
   });
@@ -107,7 +108,7 @@ export default function SignUpScreen() {
           <TextField
             label="Phone number"
             icon="call-outline"
-            placeholder="Mobile number"
+            placeholder="07912 345678"
             keyboardType="phone-pad"
             textContentType="telephoneNumber"
             value={field.value}

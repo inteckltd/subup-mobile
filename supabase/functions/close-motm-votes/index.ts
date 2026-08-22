@@ -5,6 +5,7 @@
 // inserted result notifications. Gated by x-cron-secret / CRON_SECRET,
 // same model as send-score-reminders.
 
+import { timingSafeEqual } from '../_shared/crypto.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient, withJwtSkewRetry } from '../_shared/supabase.ts';
 
@@ -67,7 +68,7 @@ Deno.serve(async (req) => {
 
   const cronSecret = Deno.env.get('CRON_SECRET');
   const suppliedSecret = req.headers.get('x-cron-secret');
-  if (!cronSecret || !suppliedSecret || suppliedSecret !== cronSecret) {
+  if (!cronSecret || !suppliedSecret || !timingSafeEqual(suppliedSecret, cronSecret)) {
     return jsonResponse({ ok: false, error: 'Unauthorized' }, 401);
   }
 

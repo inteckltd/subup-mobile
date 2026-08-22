@@ -130,13 +130,13 @@ export function PlayerLobbyRow({
           </View>
         ) : player.mmrDelta !== null ? (
           <MmrDeltaBadge delta={player.mmrDelta} />
-        ) : (
+        ) : player.paymentStatus !== 'unpaid' ? (
           <View className="rounded px-2 py-1" style={{ backgroundColor: payment.bg }}>
             <Text className="font-sans-bold text-[10px] uppercase tracking-wide" style={{ color: payment.color }}>
               {payment.label}
             </Text>
           </View>
-        )}
+        ) : null}
       </View>
     </>
   );

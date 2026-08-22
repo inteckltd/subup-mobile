@@ -63,7 +63,7 @@ export type GroupInvite = {
   email: string | null;
   invited_user_id: string | null;
   status: InviteStatus;
-  token: string;
+  sms_sent_at: string | null;
   expires_at: string;
   created_at: string;
   updated_at: string;
@@ -179,21 +179,15 @@ export type GroupGameRow = UpcomingGameRow & {
   preview_players: GamePreviewPlayer[];
 };
 
-/**
- * Raw row shape for the Members tab's direct `group_members` select
- * (embeds `profiles` via the `user_id` FK — no RPC needed, see
- * mobile/src/features/group-details/api.ts).
- */
+/** Raw row shape returned by `get_group_members()` — see 022_security_hardening.sql. */
 export type GroupMemberRow = {
   id: string;
+  user_id: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  global_mmr: number;
   role: GroupMemberRole;
   joined_at: string;
-  profile: {
-    id: string;
-    full_name: string | null;
-    avatar_url: string | null;
-    global_mmr: number;
-  } | null;
 };
 
 /**
@@ -283,9 +277,10 @@ export type MotmBallotRow = {
 
 export type GroupPendingInviteRow = {
   invite_id: string;
-  invited_user_id: string;
+  invited_user_id: string | null;
   full_name: string | null;
   avatar_url: string | null;
+  awaiting_signup: boolean;
   created_at: string;
 };
 
@@ -323,11 +318,7 @@ export type RecentGameRow = {
   team: 'home' | 'away' | null;
 };
 
-/**
- * Raw row shape for Game Details' player lobby — a direct `game_players`
- * select embedding `profiles` via the `user_id` FK (same pattern as
- * `GroupMemberRow`), see mobile/src/features/games/api.ts.
- */
+/** Raw row shape returned by `get_game_lobby_players()` — see 022_security_hardening.sql. */
 export type GamePlayerRow = {
   id: string;
   user_id: string | null;
@@ -335,12 +326,9 @@ export type GamePlayerRow = {
   is_waitlisted: boolean;
   joined_at: string;
   team: 'home' | 'away' | null;
-  profile: {
-    id: string;
-    full_name: string | null;
-    avatar_url: string | null;
-    global_mmr: number;
-  } | null;
+  full_name: string | null;
+  avatar_url: string | null;
+  global_mmr: number | null;
 };
 
 export type MmrEventRow = {

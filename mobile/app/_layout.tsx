@@ -1,3 +1,4 @@
+import 'react-native-gesture-handler';
 import '../global.css';
 
 import {
@@ -45,19 +46,27 @@ function RootLayout() {
 }
 
 function RootNavigator({ fontsLoaded }: { fontsLoaded: boolean }) {
-  const { initializing, session, hasMobile, legalCurrent } = useAuth();
+  const { initializing, session, hasMobile, mobileVerified, legalCurrent, passwordRecovery } = useAuth();
   const router = useRouter();
   const segments = useSegments();
   const ready = fontsLoaded && !initializing;
 
-  const isFullyAuthed = !!session && hasMobile && legalCurrent;
-  const needsLegal = !!session && hasMobile && !legalCurrent;
+  const isFullyAuthed = !!session && hasMobile && mobileVerified && legalCurrent && !passwordRecovery;
+  const needsMobileVerify = !!session && hasMobile && !mobileVerified && !passwordRecovery;
+  const needsLegal = !!session && hasMobile && mobileVerified && !legalCurrent && !passwordRecovery;
 
   useEffect(() => {
     if (ready) {
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [ready]);
+
+  useEffect(() => {
+    if (!ready || !needsMobileVerify) return;
+    const leaf = segments[segments.length - 1];
+    if (leaf === 'verify-mobile') return;
+    router.replace('/verify-mobile');
+  }, [needsMobileVerify, ready, router, segments]);
 
   useEffect(() => {
     if (!ready || !needsLegal) return;
@@ -67,6 +76,13 @@ function RootNavigator({ fontsLoaded }: { fontsLoaded: boolean }) {
     if ((root === 'terms' || root === 'privacy') && router.canGoBack()) return;
     router.replace('/accept-terms');
   }, [needsLegal, ready, router, segments]);
+
+  useEffect(() => {
+    if (!ready || !passwordRecovery || !session) return;
+    const leaf = segments[segments.length - 1];
+    if (leaf === 'reset-password') return;
+    router.replace('/reset-password');
+  }, [passwordRecovery, ready, router, segments, session]);
 
   if (!ready) {
     return <View style={{ flex: 1, backgroundColor: colors.background }} />;

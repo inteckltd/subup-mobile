@@ -231,6 +231,15 @@ export default function GroupDetailsScreen() {
           </View>
         ) : null}
 
+        {isAdmin && group.memberCount === 1 && !gamesQuery.isPending && !gamesQuery.isError && games.length === 0 ? (
+          <View className="mx-5 mt-4 rounded-2xl border border-border bg-white px-4 py-3">
+            <Text className="font-sans-bold text-sm text-ink">Get your squad in</Text>
+            <Text className="mt-1 font-sans text-xs text-muted">
+              Invite players, then schedule your first game with the buttons above.
+            </Text>
+          </View>
+        ) : null}
+
         <View className={isAdmin ? 'pt-5' : 'pt-2'}>
           <GroupTabBar activeTab={activeTab} onChangeTab={setActiveTab} />
         </View>
@@ -273,8 +282,8 @@ export default function GroupDetailsScreen() {
                 <SectionHeader title="Active Members" actionLabel="View All" onPressAction={() => setActiveTab('members')} />
                 {membersQuery.isPending ? (
                   <View className="flex-row gap-3">
-                    <MemberCardSkeleton />
-                    <MemberCardSkeleton />
+                    <MemberCardSkeleton fillRow />
+                    <MemberCardSkeleton fillRow />
                   </View>
                 ) : membersQuery.isError ? (
                   <ErrorState message="Couldn't load members." onRetry={() => membersQuery.refetch()} />
@@ -285,7 +294,7 @@ export default function GroupDetailsScreen() {
                     {toRows(members.slice(0, ACTIVE_MEMBERS_PREVIEW_COUNT)).map((row) => (
                       <View key={row[0]!.id} className="flex-row gap-3">
                         {row.map((member) => (
-                          <MemberCard key={member.id} member={member} />
+                          <MemberCard key={member.id} member={member} fillRow />
                         ))}
                         {row.length === 1 ? <View className="flex-1" /> : null}
                       </View>
@@ -324,7 +333,7 @@ export default function GroupDetailsScreen() {
               <View className="gap-3">
                 <SectionHeader title="Invited" />
                 {invitesQuery.isPending ? (
-                  <View className="flex-row gap-3">
+                  <View className="gap-3">
                     <MemberCardSkeleton />
                     <MemberCardSkeleton />
                   </View>
@@ -345,7 +354,9 @@ export default function GroupDetailsScreen() {
                           <Text className="font-sans-bold text-sm text-ink" numberOfLines={1}>
                             {invite.name}
                           </Text>
-                          <Text className="font-sans text-xs text-muted">Pending invite</Text>
+                          <Text className="font-sans text-xs text-muted">
+                            {invite.awaitingSignup ? 'SMS invite sent' : 'Pending invite'}
+                          </Text>
                         </View>
                         {isAdmin ? (
                           <Pressable onPress={() => confirmCancelInvite(invite)} hitSlop={8} className="rounded-full border border-border px-3 py-1.5">
@@ -385,7 +396,7 @@ export default function GroupDetailsScreen() {
         </View>
       </ScrollView>
 
-      <BottomNavBar activeKey="games" />
+      <BottomNavBar activeKey="groups" />
     </View>
   );
 }

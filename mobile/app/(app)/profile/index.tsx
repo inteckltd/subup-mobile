@@ -6,6 +6,7 @@ import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from 'react
 import { SPORT_OPTIONS } from '../../../src/features/groups/schemas';
 import { AvatarLightbox } from '../../../src/features/home/components/AvatarLightbox';
 import { BottomNavBar } from '../../../src/features/home/components/BottomNavBar';
+import { CreateFab } from '../../../src/features/home/components/CreateFab';
 import { EmptyState } from '../../../src/features/home/components/EmptyState';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { HomeHeader } from '../../../src/features/home/components/HomeHeader';
@@ -139,7 +140,15 @@ export default function ProfileScreen() {
           </View>
         </View>
       </ScrollView>
-      {session ? <BottomNavBar activeKey="profile" /> : null}
+      {session ? (
+        <>
+          <CreateFab
+            onCreateGame={() => router.push('/games/create')}
+            onCreateGroup={() => router.push('/create-group')}
+          />
+          <BottomNavBar activeKey="profile" />
+        </>
+      ) : null}
       <AvatarLightbox
         visible={lightboxOpen}
         uri={profile?.avatar_url}

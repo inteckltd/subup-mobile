@@ -10,6 +10,7 @@ import { Avatar } from '../../../src/features/home/components/Avatar';
 import { EmptyState } from '../../../src/features/home/components/EmptyState';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { formatCountdown } from '../../../src/lib/format';
+import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
 import { colors } from '../../../src/theme/tokens';
 
 function useNow(intervalMs = 1000) {
@@ -33,6 +34,8 @@ export default function MotmVoteScreen() {
 
   const ballot = ballotQuery.data;
   const selected = selectedId ?? ballot?.myVoteUserId ?? null;
+  const isDirty = ballot?.isOpen === true && selectedId != null && selectedId !== ballot.myVoteUserId;
+  const { allowLeave } = useUnsavedChangesGuard(isDirty);
 
   return (
     <View className="flex-1 bg-background">
@@ -117,7 +120,10 @@ export default function MotmVoteScreen() {
                 onPress={() => {
                   if (!selected) return;
                   void vote(selected).then((ok) => {
-                    if (ok) router.back();
+                    if (ok) {
+                      allowLeave();
+                      router.back();
+                    }
                   });
                 }}
               />

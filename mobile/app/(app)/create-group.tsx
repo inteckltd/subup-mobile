@@ -13,10 +13,10 @@ import { createGroup } from '../../src/features/groups/api';
 import { CoverImagePicker } from '../../src/features/groups/components/CoverImagePicker';
 import { FormSection } from '../../src/features/groups/components/FormSection';
 import { LockHoursSelector } from '../../src/features/groups/components/LockHoursSelector';
-import { SportSelector } from '../../src/features/groups/components/SportSelector';
 import { Stepper } from '../../src/features/groups/components/Stepper';
 import { WeekdaySelector } from '../../src/features/groups/components/WeekdaySelector';
 import { CreateGroupFormValues, createGroupDefaultValues, createGroupSchema } from '../../src/features/groups/schemas';
+import { useUnsavedChangesGuard } from '../../src/lib/useUnsavedChangesGuard';
 import { useAuth } from '../../src/providers/AuthProvider';
 import { colors } from '../../src/theme/tokens';
 
@@ -28,33 +28,39 @@ export default function CreateGroupScreen() {
   const insets = useSafeAreaInsets();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showMore, setShowMore] = useState(false);
 
   const {
     control,
     handleSubmit,
-    formState: { errors, isValid },
+    formState: { errors, isValid, isDirty },
   } = useForm<CreateGroupFormValues>({
     resolver: zodResolver(createGroupSchema),
     mode: 'onChange',
     defaultValues: createGroupDefaultValues,
   });
 
+  const { allowLeave } = useUnsavedChangesGuard(isDirty);
+
   const onSubmit = handleSubmit(async (values) => {
     if (!session) return;
     setSubmitError(null);
     setSubmitting(true);
-    const { error } = await createGroup(values, session.user.id);
+    const { id, error } = await createGroup(values, session.user.id);
     setSubmitting(false);
 
-    if (error) {
-      setSubmitError(error);
+    if (error || !id) {
+      setSubmitError(error ?? 'Something went wrong. Please try again.');
       return;
     }
 
     // Keeps Home's group list (and any other cached my-groups reads) in sync
     // with the row this screen just inserted — same query key useMyGroups uses.
     await queryClient.invalidateQueries({ queryKey: ['home', 'my-groups', session.user.id] });
-    router.back();
+    allowLeave();
+    if (router.canDismiss()) router.dismiss();
+    else router.back();
+    setTimeout(() => router.push(`/group/${id}`), 0);
   });
 
   return (
@@ -119,16 +125,6 @@ export default function CreateGroupScreen() {
                 />
               )}
             />
-            <Controller
-              control={control}
-              name="lockHours"
-              render={({ field }) => <LockHoursSelector value={field.value} onChange={field.onChange} />}
-            />
-            <Controller
-              control={control}
-              name="sport"
-              render={({ field }) => <SportSelector value={field.value} onChange={field.onChange} />}
-            />
           </FormSection>
 
           <FormSection title="Venue">
@@ -139,7 +135,7 @@ export default function CreateGroupScreen() {
                 <TextField
                   label="Venue name"
                   icon="location-outline"
-                  placeholder="Centennial Park"
+                  placeholder="Powerleague Shoreditch"
                   autoCapitalize="words"
                   value={field.value}
                   onChangeText={field.onChange}
@@ -155,7 +151,7 @@ export default function CreateGroupScreen() {
                 <TextField
                   label="Venue address"
                   icon="map-outline"
-                  placeholder="Field 2, Centennial Park"
+                  placeholder="Pitch 2, London"
                   autoCapitalize="words"
                   value={field.value}
                   onChangeText={field.onChange}
@@ -166,33 +162,50 @@ export default function CreateGroupScreen() {
             />
           </FormSection>
 
-          <FormSection title="Regular schedule">
-            <View className="w-full gap-2">
-              <Text className="font-sans-bold text-xs uppercase tracking-wider text-muted">Day</Text>
-              <Controller
-                control={control}
-                name="weekday"
-                render={({ field }) => <WeekdaySelector value={field.value} onChange={field.onChange} />}
-              />
-            </View>
+          <Pressable onPress={() => setShowMore((open) => !open)} className="flex-row items-center justify-between py-1">
+            <Text className="font-sans-bold text-sm text-primary">{showMore ? 'Hide options' : 'More options'}</Text>
+            <Ionicons name={showMore ? 'chevron-up' : 'chevron-down'} size={16} color={colors.primary} />
+          </Pressable>
 
-            <View className="w-full flex-row items-center justify-center gap-8 border-t border-[#F9FAFB] pt-4">
-              <Controller
-                control={control}
-                name="hour"
-                render={({ field }) => (
-                  <Stepper label="Hour" value={field.value} min={0} max={23} formatValue={pad2} onChange={field.onChange} />
-                )}
-              />
-              <Controller
-                control={control}
-                name="minute"
-                render={({ field }) => (
-                  <Stepper label="Minute" value={field.value} min={0} max={59} step={5} formatValue={pad2} onChange={field.onChange} />
-                )}
-              />
-            </View>
-          </FormSection>
+          {showMore ? (
+            <>
+              <FormSection title="Lock window">
+                <Controller
+                  control={control}
+                  name="lockHours"
+                  render={({ field }) => <LockHoursSelector value={field.value} onChange={field.onChange} />}
+                />
+              </FormSection>
+
+              <FormSection title="Regular schedule">
+                <View className="w-full gap-2">
+                  <Text className="font-sans-bold text-xs uppercase tracking-wider text-muted">Day</Text>
+                  <Controller
+                    control={control}
+                    name="weekday"
+                    render={({ field }) => <WeekdaySelector value={field.value} onChange={field.onChange} />}
+                  />
+                </View>
+
+                <View className="w-full flex-row items-center justify-center gap-8 border-t border-[#F9FAFB] pt-4">
+                  <Controller
+                    control={control}
+                    name="hour"
+                    render={({ field }) => (
+                      <Stepper label="Hour" value={field.value} min={0} max={23} formatValue={pad2} onChange={field.onChange} />
+                    )}
+                  />
+                  <Controller
+                    control={control}
+                    name="minute"
+                    render={({ field }) => (
+                      <Stepper label="Minute" value={field.value} min={0} max={59} step={5} formatValue={pad2} onChange={field.onChange} />
+                    )}
+                  />
+                </View>
+              </FormSection>
+            </>
+          ) : null}
 
           {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
         </ScrollView>

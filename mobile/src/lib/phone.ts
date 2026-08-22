@@ -2,13 +2,19 @@
  * UK mobile helpers.
  *
  * Canonical stored/login format is always E.164 (+44XXXXXXXXXX). Accepted
- * user input formats: "07…", "7…", "+447…", "447…" (with optional spaces).
+ * user input formats: "07…", "7…", "+447…", "+4407…", "447…", "4407…"
+ * (with optional spaces).
  */
 
 const UK_MOBILE_E164 = /^\+447\d{9}$/;
 
 function stripSpaces(value: string): string {
   return value.replace(/[\s-]/g, '');
+}
+
+/** National digits after +44, stripping a UK trunk prefix 0 if present. */
+function nationalAfter44(value: string): string {
+  return value.startsWith('0') ? value.slice(1) : value;
 }
 
 /**
@@ -21,9 +27,9 @@ export function normalizeUkMobile(input: string): string | null {
 
   let candidate: string;
   if (trimmed.startsWith('+44')) {
-    candidate = trimmed;
+    candidate = `+44${nationalAfter44(trimmed.slice(3))}`;
   } else if (trimmed.startsWith('44')) {
-    candidate = `+${trimmed}`;
+    candidate = `+44${nationalAfter44(trimmed.slice(2))}`;
   } else if (trimmed.startsWith('07')) {
     candidate = `+44${trimmed.slice(1)}`;
   } else if (/^7\d{9}$/.test(trimmed)) {
@@ -65,9 +71,9 @@ export function formatUkMobileForDisplay(e164: string): string {
   return `+44 ${match[1]} ${match[2]}`;
 }
 
-/** National digits after +44 for the edit-profile field, e.g. "7912345678". */
+/** National format for the edit-profile field, e.g. "07912345678". */
 export function ukMobileNationalDigits(e164: string): string {
   const normalised = normalizeUkMobile(e164);
   if (!normalised) return '';
-  return normalised.slice(3);
+  return `0${normalised.slice(3)}`;
 }

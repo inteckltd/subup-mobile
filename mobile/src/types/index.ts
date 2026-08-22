@@ -2,6 +2,7 @@ export type Profile = {
   id: string;
   full_name: string;
   mobile: string | null;
+  mobile_verified_at: string | null;
   email: string | null;
   avatar_url: string | null;
   terms_accepted_at: string | null;
