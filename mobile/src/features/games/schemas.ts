@@ -48,6 +48,7 @@ export function teamColorById(id: string) {
 export const createGameSchema = z
   .object({
     groupId: z.string().min(1, 'Select a group'),
+    title: z.string().trim().max(80, 'Keep the game name under 80 characters').optional(),
     date: z.date(),
     time: z.date(),
     venueName: z.string().trim().min(1, 'Enter a venue name'),
@@ -111,6 +112,7 @@ export function nextOccurrenceOfWeekdayTime(weekday: number, hour: number, minut
  */
 export const createGameDefaultValues: CreateGameFormValues = {
   groupId: '',
+  title: '',
   date: nextOccurrenceOf(19, 30),
   time: nextOccurrenceOf(19, 30),
   venueName: '',

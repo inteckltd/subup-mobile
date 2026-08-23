@@ -22,8 +22,12 @@ export function TermsCopy() {
         with respect and not to misuse invites, notifications, or SMS.
       </Para>
       <Para>
-        In-app card payments are not available yet. Any pitch cost shown in the app is information only — you settle
-        cash (or another method) with your organiser outside PitchIn until card pay ships.
+        Paid games are joined with Apple Pay, Google Pay, or card via Stripe. You pay the pitch cost the organiser set
+        plus a PitchIn service fee shown before you confirm. The organiser (the group treasurer) receives the pitch
+        amount through Stripe Connect; PitchIn retains the service fee. There is no cash or waived entry. If a game is
+        cancelled or you leave before the lock window, card payments are refunded in full (pitch plus PitchIn fee).
+        After the lock window, payments are not refunded. The treasurer is paid the pitch total after lock; that
+        usually reaches their bank in around two business days. PitchIn retains the service fee when you pay.
       </Para>
       <Para>
         We may suspend or delete accounts that abuse the service (for example spam invites, impersonation, or attempts
@@ -33,7 +37,7 @@ export function TermsCopy() {
       <Para>
         PitchIn is provided as-is. We do not guarantee that every game will go ahead, that scores or ratings are
         complete, or that the service will be uninterrupted. To the extent permitted by UK law we are not liable for
-        lost games, missed payments arranged off-app, or indirect loss.
+        lost games, payment processor outages, or indirect loss.
       </Para>
       <Text className="font-sans text-base text-muted">
         This draft will be reviewed by a solicitor before public App Store / Play Store launch. Hosted web copies of
@@ -59,7 +63,8 @@ export function PrivacyCopy() {
       <Para>
         Data is stored with Supabase (Postgres, Auth, Storage) with a UK/EU region target. Password-reset and group
         invite texts are sent by Twilio. Push notifications use Expo. Crash and error reports may be sent to Sentry if
-        configured. We do not sell your data.
+        configured. Card and payout payments are processed by Stripe (including Stripe Connect for organiser payouts).
+        We do not sell your data. We do not store full card or bank account numbers.
       </Para>
       <Para>
         Group members can see your name, photo, and rating — not your mobile or email — through the app. Group admins

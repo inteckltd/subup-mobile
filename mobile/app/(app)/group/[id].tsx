@@ -257,6 +257,12 @@ export default function GroupDetailsScreen() {
                     icon="calendar-outline"
                     title="No games scheduled"
                     subtitle="Games from this group will show up here once they're scheduled."
+                    actionLabel={isAdmin ? 'Schedule a game' : undefined}
+                    onPressAction={
+                      isAdmin
+                        ? () => router.push({ pathname: '/games/create', params: { groupId: group.id } })
+                        : undefined
+                    }
                   />
                 ) : (
                   <>

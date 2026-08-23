@@ -4,15 +4,24 @@ import { useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { z } from 'zod';
 
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
 import { TextField } from '../../../src/features/auth/components/TextField';
 import { inviteGroupMember } from '../../../src/features/group-details/api';
 import { useGroupDetail } from '../../../src/features/group-details/hooks';
-import { isValidUkMobile } from '../../../src/lib/phone';
+import {
+  buildInviteShareMessage,
+  inviteShareFirstName,
+  shareInviteViaSms,
+  shareInviteViaWhatsApp,
+} from '../../../src/features/group-details/shareInvite';
+import { FormFooter } from '../../../src/features/groups/components/FormFooter';
+import { env } from '../../../src/lib/env';
+import { isValidUkMobile, nationaliseUkMobileInput } from '../../../src/lib/phone';
 import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
@@ -25,17 +34,18 @@ type InviteForm = z.infer<typeof inviteSchema>;
 
 export default function InviteMemberScreen() {
   const { groupId } = useLocalSearchParams<{ groupId: string }>();
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
   const queryClient = useQueryClient();
-  const insets = useSafeAreaInsets();
   const groupQuery = useGroupDetail(groupId);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const {
     control,
     handleSubmit,
     reset,
+    watch,
     formState: { errors, isValid, isDirty },
   } = useForm<InviteForm>({
     resolver: zodResolver(inviteSchema),
@@ -44,8 +54,32 @@ export default function InviteMemberScreen() {
   });
 
   const { allowLeave } = useUnsavedChangesGuard(isDirty);
+  const mobileValue = watch('mobile');
 
   const isAdmin = groupQuery.data?.role === 'admin';
+  const shareMessage = buildInviteShareMessage({
+    firstName: inviteShareFirstName(profile?.full_name),
+    groupName: groupQuery.data?.name ?? 'a group',
+    url: env.EXPO_PUBLIC_INVITE_APP_URL,
+  });
+
+  const onShareWhatsApp = async () => {
+    setShareError(null);
+    try {
+      await shareInviteViaWhatsApp(shareMessage, mobileValue);
+    } catch {
+      setShareError("Couldn't open WhatsApp.");
+    }
+  };
+
+  const onShareMessages = async () => {
+    setShareError(null);
+    try {
+      await shareInviteViaSms(shareMessage, mobileValue);
+    } catch {
+      setShareError("Couldn't open Messages.");
+    }
+  };
 
   const onSubmit = handleSubmit(async (values) => {
     if (!groupId || !session) return;
@@ -89,8 +123,13 @@ export default function InviteMemberScreen() {
           <Text className="font-sans text-sm text-muted">Only admins can invite members.</Text>
         </View>
       ) : (
-        <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }} keyboardShouldPersistTaps="handled">
+        <View className="flex-1">
+          <KeyboardAwareScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ padding: 20, gap: 16 }}
+            keyboardShouldPersistTaps="handled"
+            bottomOffset={88}
+          >
             <Text className="font-sans text-sm text-muted">
               Invite someone by their UK mobile number. If they don&apos;t have PitchIn yet, we&apos;ll text them a download link.
             </Text>
@@ -103,19 +142,52 @@ export default function InviteMemberScreen() {
                   icon="call-outline"
                   keyboardType="phone-pad"
                   placeholder="07912 345678"
+                  textContentType="telephoneNumber"
                   value={field.value}
                   onChangeText={field.onChange}
-                  onBlur={field.onBlur}
+                  onBlur={() => {
+                    field.onChange(nationaliseUkMobileInput(field.value));
+                    field.onBlur();
+                  }}
                   error={errors.mobile?.message}
                 />
               )}
             />
             {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
-          </ScrollView>
-          <View className="border-t border-border bg-white px-4 pt-4" style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
-            <PrimaryButton label="Invite" loading={submitting} disabled={!isValid} onPress={onSubmit} />
-          </View>
-        </KeyboardAvoidingView>
+
+            <View className="mt-2 gap-3">
+              <View className="flex-row items-center gap-3">
+                <View className="h-px flex-1 bg-border" />
+                <Text className="font-sans-medium text-xs uppercase tracking-wide text-muted">Or share a message</Text>
+                <View className="h-px flex-1 bg-border" />
+              </View>
+              <Text className="font-sans text-sm text-muted">
+                Sharing a download link does not add them to the group — invite by mobile so they can accept in
+                PitchIn.
+              </Text>
+              <View className="flex-row gap-3">
+                <Pressable
+                  onPress={onShareWhatsApp}
+                  className="flex-1 flex-row items-center justify-center gap-2 rounded-2xl border border-border bg-white py-3.5"
+                >
+                  <Ionicons name="logo-whatsapp" size={18} color={colors.ink} />
+                  <Text className="font-sans-bold text-sm text-ink">WhatsApp</Text>
+                </Pressable>
+                <Pressable
+                  onPress={onShareMessages}
+                  className="flex-1 flex-row items-center justify-center gap-2 rounded-2xl border border-border bg-white py-3.5"
+                >
+                  <Ionicons name="chatbubble-outline" size={18} color={colors.ink} />
+                  <Text className="font-sans-bold text-sm text-ink">Messages</Text>
+                </Pressable>
+              </View>
+              {shareError ? <Text className="font-sans-medium text-sm text-danger">{shareError}</Text> : null}
+            </View>
+          </KeyboardAwareScrollView>
+          <FormFooter>
+            <PrimaryButton label="Invite Member" loading={submitting} disabled={!isValid} onPress={onSubmit} />
+          </FormFooter>
+        </View>
       )}
     </View>
   );

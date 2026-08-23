@@ -22,7 +22,7 @@ const CLOSE_DURATION = 200;
 const STAGGER_STEP = 0.16;
 
 /**
- * Speed-dial FAB — tapping "+" fans "Create Game"/"Create Group" out above
+ * Speed-dial FAB — tapping "+" fans "Create Group"/"Create Game" out above
  * it with a staggered pop-in and morphs the icon into an "X", backed by a
  * tap-to-dismiss scrim. Uses plain `Animated` (not Reanimated) to match the
  * rest of the codebase's loading-state animations (see Skeleton.tsx).
@@ -50,8 +50,8 @@ export function CreateFab({ onCreateGame, onCreateGroup }: CreateFabProps) {
   const backdropOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
 
   const actions: ActionConfig[] = [
-    { key: 'game', icon: 'calendar-outline', label: 'Create Game', onPress: onCreateGame },
     { key: 'group', icon: 'people-outline', label: 'Create Group', onPress: onCreateGroup },
+    { key: 'game', icon: 'calendar-outline', label: 'Create Game', onPress: onCreateGame },
   ];
 
   return (

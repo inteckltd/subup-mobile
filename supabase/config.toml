@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.apply-game-lock]
 verify_jwt = false
+
+[functions.stripe-webhooks]
+verify_jwt = false
+
+[functions.stripe-connect-redirect]
+verify_jwt = false

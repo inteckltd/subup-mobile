@@ -39,6 +39,8 @@ function mapGroupDetail(row: GroupDetailRow): GroupDetailModel {
     lockHours: row.lock_hours,
     role: row.role,
     memberCount: row.member_count,
+    payoutUserId: row.payout_user_id,
+    payoutsReady: row.payouts_ready,
   };
 }
 

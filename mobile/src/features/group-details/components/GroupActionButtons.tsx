@@ -32,7 +32,7 @@ export function GroupActionButtons({ onPressCreateGame, onPressInvite }: GroupAc
         className="flex-1 flex-row items-center justify-center gap-2 rounded-2xl border border-border bg-white py-3.5"
       >
         <Ionicons name="person-add-outline" size={18} color={colors.ink} />
-        <Text className="font-sans-bold text-sm text-ink">Invite</Text>
+        <Text className="font-sans-bold text-sm text-ink">Invite Member</Text>
       </Pressable>
     </View>
   );

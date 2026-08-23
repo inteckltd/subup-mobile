@@ -1,13 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
 import { TextField } from '../../../src/features/auth/components/TextField';
 import { useGameDetail, useSubmitGameScore } from '../../../src/features/games/hooks';
 import { teamColorById } from '../../../src/features/games/schemas';
+import { FormFooter } from '../../../src/features/groups/components/FormFooter';
 import { Stepper } from '../../../src/features/groups/components/Stepper';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { formatDurationLabel, formatFullDateLabel, hasGameEnded } from '../../../src/lib/format';
@@ -25,7 +27,6 @@ import { colors } from '../../../src/theme/tokens';
  */
 export default function EnterScoreScreen() {
   const { gameId } = useLocalSearchParams<{ gameId: string }>();
-  const insets = useSafeAreaInsets();
   const gameQuery = useGameDetail(gameId);
   const { submit, submitting, error: submitError } = useSubmitGameScore(gameId);
 
@@ -93,11 +94,13 @@ export default function EnterScoreScreen() {
           <PrimaryButton label="Back" className="w-auto px-8" onPress={() => router.back()} />
         </View>
       ) : (
-        <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView
+        <View className="flex-1">
+          <KeyboardAwareScrollView
+            style={{ flex: 1 }}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ padding: 20, paddingBottom: 140, gap: 20 }}
+            bottomOffset={88}
+            contentContainerStyle={{ padding: 20, paddingBottom: 24, gap: 20 }}
           >
             <View className="w-full gap-1 rounded-2xl bg-white p-4" style={{ shadowColor: '#000000', shadowOpacity: 0.05, shadowRadius: 1, shadowOffset: { width: 0, height: 1 } }}>
               <Text className="font-sans-bold text-xs uppercase tracking-wider text-muted">{game.groupName}</Text>
@@ -132,18 +135,12 @@ export default function EnterScoreScreen() {
             />
 
             {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
-          </ScrollView>
-        </KeyboardAvoidingView>
-      )}
-
-      {canScore ? (
-        <View
-          className="absolute bottom-0 left-0 right-0 border-t border-border bg-white px-4 pt-4"
-          style={{ paddingBottom: Math.max(insets.bottom, 24) }}
-        >
-          <PrimaryButton label="Save Score" loading={submitting} onPress={onSubmit} />
+          </KeyboardAwareScrollView>
+          <FormFooter>
+            <PrimaryButton label="Save Score" loading={submitting} onPress={onSubmit} />
+          </FormFooter>
         </View>
-      ) : null}
+      )}
     </View>
   );
 }

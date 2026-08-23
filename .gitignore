@@ -52,3 +52,4 @@ supabase/.temp/
 # Seed data
 supabase/seed_test_data.sql
 supabase/seed_app_review_user.sql
+supabase/wipe_keep_app_review.sql

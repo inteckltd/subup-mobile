@@ -77,3 +77,11 @@ export function ukMobileNationalDigits(e164: string): string {
   if (!normalised) return '';
   return `0${normalised.slice(3)}`;
 }
+
+/**
+ * Rewrites an autofilled / typed mobile to national 07… on blur.
+ * Leaves the value unchanged when it is not a valid UK mobile yet.
+ */
+export function nationaliseUkMobileInput(input: string): string {
+  return ukMobileNationalDigits(input) || input;
+}

@@ -8,13 +8,16 @@ import {
   Manrope_800ExtraBold,
   useFonts,
 } from '@expo-google-fonts/manrope';
+import { StripeProvider } from '@stripe/stripe-react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { View } from 'react-native';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { env } from '../src/lib/env';
 import { queryClient } from '../src/lib/queryClient';
 import { initSentry, Sentry } from '../src/lib/sentry';
 import { AuthProvider, useAuth } from '../src/providers/AuthProvider';
@@ -34,13 +37,21 @@ function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
-        <ConnectivityProvider>
-          <AuthProvider>
-            <RootNavigator fontsLoaded={fontsLoaded} />
-          </AuthProvider>
-        </ConnectivityProvider>
-      </QueryClientProvider>
+      <KeyboardProvider>
+        <QueryClientProvider client={queryClient}>
+          <ConnectivityProvider>
+            <AuthProvider>
+              <StripeProvider
+                publishableKey={env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? ''}
+                merchantIdentifier="merchant.com.inteck.pitchin"
+                urlScheme="pitchin"
+              >
+                <RootNavigator fontsLoaded={fontsLoaded} />
+              </StripeProvider>
+            </AuthProvider>
+          </ConnectivityProvider>
+        </QueryClientProvider>
+      </KeyboardProvider>
     </SafeAreaProvider>
   );
 }

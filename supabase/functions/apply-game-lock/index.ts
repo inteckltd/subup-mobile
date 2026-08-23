@@ -8,6 +8,7 @@
 
 import { timingSafeEqual } from '../_shared/crypto.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
+import { getStripe, payoutDueTreasurerGames, refundSucceededPayments } from '../_shared/stripe.ts';
 import { createServiceClient, withJwtSkewRetry } from '../_shared/supabase.ts';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
@@ -82,6 +83,28 @@ Deno.serve(async (req) => {
   }
 
   const serviceClient = createServiceClient(supabaseUrl, serviceRoleKey);
+
+  const { data: expired, error: expireError } = await withJwtSkewRetry(() =>
+    serviceClient.rpc('expire_pending_joins'),
+  );
+  if (expireError) {
+    console.error('[apply-game-lock] expire_pending_joins failed', expireError);
+    await captureEdgeError('apply-game-lock', expireError);
+  } else if (Deno.env.get('STRIPE_SECRET_KEY')) {
+    const stripe = getStripe();
+    for (const row of (expired ?? []) as { payment_intent_id: string | null }[]) {
+      if (!row.payment_intent_id) continue;
+      try {
+        await stripe.paymentIntents.cancel(row.payment_intent_id);
+      } catch (cancelError) {
+        const message = cancelError instanceof Error ? cancelError.message : String(cancelError);
+        if (!/canceled|cannot be canceled/i.test(message)) {
+          console.error('[apply-game-lock] cancel PaymentIntent failed', cancelError);
+        }
+      }
+    }
+  }
+
   const { data: processed, error: lockError } = await withJwtSkewRetry(() =>
     serviceClient.rpc('apply_game_lock_window'),
   );
@@ -91,9 +114,29 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, error: 'Could not apply game lock window' }, 500);
   }
 
-  const gameIds = ((processed ?? []) as { game_id: string }[]).map((row) => row.game_id);
+  const lockRows = ((processed ?? []) as { game_id: string; action: string }[]);
+  const gameIds = lockRows.map((row) => row.game_id);
   if (gameIds.length === 0) {
     return jsonResponse({ ok: true, gamesProcessed: 0, notified: 0, pushed: 0 });
+  }
+
+  if (Deno.env.get('STRIPE_SECRET_KEY')) {
+    const stripe = getStripe();
+    for (const row of lockRows) {
+      if (row.action !== 'cancelled') continue;
+      try {
+        await refundSucceededPayments(serviceClient, stripe, row.game_id);
+      } catch (refundError) {
+        console.error('[apply-game-lock] refund after cancel failed', refundError);
+        await captureEdgeError('apply-game-lock', refundError);
+      }
+    }
+    try {
+      await payoutDueTreasurerGames(serviceClient, stripe);
+    } catch (payoutError) {
+      console.error('[apply-game-lock] treasurer payouts failed', payoutError);
+      await captureEdgeError('apply-game-lock', payoutError);
+    }
   }
 
   const { data: notifications, error: notificationsError } = await serviceClient

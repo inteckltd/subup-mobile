@@ -51,6 +51,17 @@ const KNOWN_MESSAGES = [
   'Editing is locked within',
   'Kickoff has already passed',
   'Max players cannot be below',
+  'Set up payouts before creating a paid game',
+  'Price cannot change after someone has paid',
+  'Pay to join this game',
+  'This group cannot take payments yet',
+  'This game is free',
+  'You are on the waitlist',
+  'Payouts can only go to a group admin',
+  'Only group admins can change payouts',
+  "Couldn't refund this payment",
+  "Couldn't leave this game",
+  "You can't leave within the lock window",
 ];
 
 /** A friendly, user-safe message — never leak raw Supabase/Postgres error text (same pattern as features/auth/api.ts). */
@@ -125,10 +136,16 @@ function mapGameDetail(row: GameDetailRow): GameDetailModel {
     myMotmVoteUserId: row.my_motm_vote_user_id,
     teamsPickedAt: row.teams_picked_at,
     spotsTaken: row.spots_taken,
+    spotsPaid: row.spots_paid,
     waitlistCount: row.waitlist_count,
     hasJoined: row.has_joined,
     isWaitlisted: row.is_waitlisted,
     isAdmin: row.is_admin,
+    myPaymentStatus: row.my_payment_status,
+    myPendingExpiresAt: row.my_pending_expires_at,
+    feeCents: row.fee_cents,
+    totalCents: row.total_cents,
+    payoutsReady: row.payouts_ready,
   };
 }
 
@@ -183,6 +200,7 @@ export async function createGame(values: CreateGameFormValues): Promise<{ id?: s
 
   const { data, error } = await supabase.rpc('create_game', {
     p_group_id: values.groupId,
+    p_title: values.title?.trim() || null,
     p_starts_at: startsAt.toISOString(),
     p_venue_name: values.venueName.trim(),
     p_venue_address: values.venueAddress?.trim() || null,
@@ -216,6 +234,7 @@ export async function updateGame(gameId: string, values: CreateGameFormValues): 
 
   const { error } = await supabase.rpc('update_game', {
     p_game_id: gameId,
+    p_title: values.title?.trim() || null,
     p_starts_at: startsAt.toISOString(),
     p_venue_name: values.venueName.trim(),
     p_venue_address: values.venueAddress?.trim() || null,
@@ -243,6 +262,13 @@ export async function updateGame(gameId: string, values: CreateGameFormValues): 
 export async function cancelGame(gameId: string): Promise<{ error?: string }> {
   const { error } = await supabase.rpc('cancel_game', { p_game_id: gameId });
   if (error) return { error: friendlyError(error, "Couldn't cancel this game. Please try again.") };
+
+  try {
+    await supabase.functions.invoke('refund-game-payments', { body: { gameId } });
+  } catch (refundError) {
+    recordDiagnosticError('games', refundError);
+    console.error('[games] refund-game-payments invoke failed', refundError);
+  }
 
   try {
     await supabase.functions.invoke('notify-game-lifecycle', { body: { gameId, type: 'game_cancelled' } });
@@ -304,11 +330,21 @@ export async function joinGame(gameId: string): Promise<{ error?: string }> {
 }
 
 /** Race-safe leave via the `leave_game` RPC — blocked inside the game's auto-cancel window for confirmed players. Promotes the earliest waitlisted player when a confirmed spot frees; push for that player is best-effort. */
-export async function leaveGame(gameId: string): Promise<{ error?: string }> {
-  const { data, error } = await supabase.rpc('leave_game', { p_game_id: gameId });
-  if (error) return { error: friendlyError(error, "Couldn't leave this game. Please try again.") };
+export async function leaveGame(gameId: string, options?: { paid?: boolean }): Promise<{ error?: string }> {
+  let promotedUserId: string | null = null;
 
-  const promotedUserId = typeof data === 'string' ? data : null;
+  if (options?.paid) {
+    const { data, error } = await supabase.functions.invoke('leave-paid-game', { body: { gameId } });
+    if (error || data?.ok === false) {
+      return { error: friendlyError(error ?? data, data?.error ?? "Couldn't leave this game. Please try again.") };
+    }
+    promotedUserId = typeof data?.promotedUserId === 'string' ? data.promotedUserId : null;
+  } else {
+    const { data, error } = await supabase.rpc('leave_game', { p_game_id: gameId });
+    if (error) return { error: friendlyError(error, "Couldn't leave this game. Please try again.") };
+    promotedUserId = typeof data === 'string' ? data : null;
+  }
+
   if (promotedUserId) {
     try {
       await supabase.functions.invoke('notify-waitlist-promoted', {

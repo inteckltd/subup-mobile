@@ -4,14 +4,16 @@ import { useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
 import { TextField } from '../../../src/features/auth/components/TextField';
 import { useGroupDetail } from '../../../src/features/group-details/hooks';
 import { updateGroup, uploadGroupCoverImage } from '../../../src/features/groups/api';
 import { CoverImagePicker } from '../../../src/features/groups/components/CoverImagePicker';
+import { FormFooter } from '../../../src/features/groups/components/FormFooter';
 import { FormSection } from '../../../src/features/groups/components/FormSection';
 import { LockHoursSelector } from '../../../src/features/groups/components/LockHoursSelector';
 import { Stepper } from '../../../src/features/groups/components/Stepper';
@@ -27,7 +29,6 @@ export default function EditGroupScreen() {
   const { groupId } = useLocalSearchParams<{ groupId: string }>();
   const { session } = useAuth();
   const queryClient = useQueryClient();
-  const insets = useSafeAreaInsets();
   const groupQuery = useGroupDetail(groupId);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -133,11 +134,13 @@ export default function EditGroupScreen() {
         </View>
       </SafeAreaView>
 
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
+      <View className="flex-1">
+        <KeyboardAwareScrollView
+          style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 20, paddingBottom: 140, gap: 24 }}
+          bottomOffset={88}
+          contentContainerStyle={{ padding: 20, paddingBottom: 24, gap: 24 }}
         >
           <FormSection title="Group details">
             <Controller
@@ -240,12 +243,28 @@ export default function EditGroupScreen() {
             </View>
           </FormSection>
 
-          {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
+          <FormSection title="Payouts">
+            <Pressable
+              onPress={() => router.push(`/group/payouts?groupId=${groupId}`)}
+              className="flex-row items-center justify-between py-1"
+            >
+              <View className="flex-1 pr-3">
+                <Text className="font-sans-bold text-sm text-ink">Pitch money</Text>
+                <Text className="mt-1 font-sans text-xs text-muted">
+                  {group.payoutsReady
+                    ? 'Payouts are set up for paid games.'
+                    : 'Set up Stripe payouts before you charge to join.'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+            </Pressable>
+          </FormSection>
 
-      <View className="absolute bottom-0 left-0 right-0 border-t border-border bg-white px-4 pt-4" style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
-        <PrimaryButton label="Save changes" loading={submitting} disabled={!isValid} onPress={onSubmit} />
+          {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
+        </KeyboardAwareScrollView>
+        <FormFooter>
+          <PrimaryButton label="Save changes" loading={submitting} disabled={!isValid} onPress={onSubmit} />
+        </FormFooter>
       </View>
     </View>
   );

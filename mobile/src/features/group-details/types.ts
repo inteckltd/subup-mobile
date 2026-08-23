@@ -13,6 +13,18 @@ export type GroupDetailModel = {
   lockHours: LockHours;
   role: GroupMemberRole;
   memberCount: number;
+  payoutUserId: string;
+  payoutsReady: boolean;
+};
+
+export type GroupPayoutsModel = {
+  payoutUserId: string;
+  treasurerName: string;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  transfersEnabled: boolean;
+  isSelf: boolean;
+  isAdmin: boolean;
 };
 
 export type GroupMemberModel = {

@@ -1,21 +1,34 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
+import * as WebBrowser from 'expo-web-browser';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Pressable, Text, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '../../src/features/auth/components/PrimaryButton';
 import { TextField } from '../../src/features/auth/components/TextField';
 import { createGroup } from '../../src/features/groups/api';
 import { CoverImagePicker } from '../../src/features/groups/components/CoverImagePicker';
+import { FormFooter } from '../../src/features/groups/components/FormFooter';
 import { FormSection } from '../../src/features/groups/components/FormSection';
 import { LockHoursSelector } from '../../src/features/groups/components/LockHoursSelector';
 import { Stepper } from '../../src/features/groups/components/Stepper';
 import { WeekdaySelector } from '../../src/features/groups/components/WeekdaySelector';
 import { CreateGroupFormValues, createGroupDefaultValues, createGroupSchema } from '../../src/features/groups/schemas';
+import {
+  type ConnectStatus,
+  connectAccountReady,
+  connectSetupButtonLabel,
+  connectStatusMessage,
+  invalidatePayoutsQueries,
+  startConnectOnboarding,
+  syncConnectStatus,
+  syncConnectStatusUntilReady,
+} from '../../src/features/payments/api';
 import { useUnsavedChangesGuard } from '../../src/lib/useUnsavedChangesGuard';
 import { useAuth } from '../../src/providers/AuthProvider';
 import { colors } from '../../src/theme/tokens';
@@ -25,10 +38,12 @@ const pad2 = (value: number) => String(value).padStart(2, '0');
 export default function CreateGroupScreen() {
   const { session } = useAuth();
   const queryClient = useQueryClient();
-  const insets = useSafeAreaInsets();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [showMore, setShowMore] = useState(false);
+  const [payoutsReady, setPayoutsReady] = useState(false);
+  const [payoutsWorking, setPayoutsWorking] = useState(false);
+  const [payoutsError, setPayoutsError] = useState<string | null>(null);
+  const [payoutsStatus, setPayoutsStatus] = useState<ConnectStatus>({});
 
   const {
     control,
@@ -41,6 +56,35 @@ export default function CreateGroupScreen() {
   });
 
   const { allowLeave } = useUnsavedChangesGuard(isDirty);
+
+  useEffect(() => {
+    void syncConnectStatus().then((result) => {
+      setPayoutsStatus(result);
+      if (connectAccountReady(result)) setPayoutsReady(true);
+    });
+  }, []);
+
+  async function onSetupPayouts() {
+    setPayoutsError(null);
+    setPayoutsWorking(true);
+    const result = await startConnectOnboarding();
+    if (result.error || !result.url) {
+      setPayoutsWorking(false);
+      setPayoutsError(result.error ?? "Couldn't start payouts setup.");
+      return;
+    }
+    await WebBrowser.openAuthSessionAsync(result.url, 'pitchin://stripe-connect/return');
+    const status = await syncConnectStatusUntilReady();
+    setPayoutsStatus(status);
+    setPayoutsReady(connectAccountReady(status));
+    if (status.error) {
+      setPayoutsError(status.error);
+    } else if (!connectAccountReady(status)) {
+      setPayoutsError(connectStatusMessage(status));
+    }
+    await invalidatePayoutsQueries(queryClient);
+    setPayoutsWorking(false);
+  }
 
   const onSubmit = handleSubmit(async (values) => {
     if (!session) return;
@@ -80,11 +124,13 @@ export default function CreateGroupScreen() {
         </View>
       </SafeAreaView>
 
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
+      <View className="flex-1">
+        <KeyboardAwareScrollView
+          style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 20, paddingBottom: 140, gap: 24 }}
+          bottomOffset={88}
+          contentContainerStyle={{ padding: 20, paddingBottom: 24, gap: 24 }}
         >
           <FormSection title="Group details">
             <Controller
@@ -162,60 +208,74 @@ export default function CreateGroupScreen() {
             />
           </FormSection>
 
-          <Pressable onPress={() => setShowMore((open) => !open)} className="flex-row items-center justify-between py-1">
-            <Text className="font-sans-bold text-sm text-primary">{showMore ? 'Hide options' : 'More options'}</Text>
-            <Ionicons name={showMore ? 'chevron-up' : 'chevron-down'} size={16} color={colors.primary} />
-          </Pressable>
+          <FormSection title="Lock window">
+            <Controller
+              control={control}
+              name="lockHours"
+              render={({ field }) => <LockHoursSelector value={field.value} onChange={field.onChange} />}
+            />
+          </FormSection>
 
-          {showMore ? (
-            <>
-              <FormSection title="Lock window">
-                <Controller
-                  control={control}
-                  name="lockHours"
-                  render={({ field }) => <LockHoursSelector value={field.value} onChange={field.onChange} />}
-                />
-              </FormSection>
+          <FormSection title="Regular schedule">
+            <View className="w-full gap-2">
+              <Text className="font-sans-bold text-xs uppercase tracking-wider text-muted">Day</Text>
+              <Controller
+                control={control}
+                name="weekday"
+                render={({ field }) => <WeekdaySelector value={field.value} onChange={field.onChange} />}
+              />
+            </View>
 
-              <FormSection title="Regular schedule">
-                <View className="w-full gap-2">
-                  <Text className="font-sans-bold text-xs uppercase tracking-wider text-muted">Day</Text>
-                  <Controller
-                    control={control}
-                    name="weekday"
-                    render={({ field }) => <WeekdaySelector value={field.value} onChange={field.onChange} />}
-                  />
-                </View>
+            <View className="w-full flex-row items-center justify-center gap-8 border-t border-[#F9FAFB] pt-4">
+              <Controller
+                control={control}
+                name="hour"
+                render={({ field }) => (
+                  <Stepper label="Hour" value={field.value} min={0} max={23} formatValue={pad2} onChange={field.onChange} />
+                )}
+              />
+              <Controller
+                control={control}
+                name="minute"
+                render={({ field }) => (
+                  <Stepper label="Minute" value={field.value} min={0} max={59} step={5} formatValue={pad2} onChange={field.onChange} />
+                )}
+              />
+            </View>
+          </FormSection>
 
-                <View className="w-full flex-row items-center justify-center gap-8 border-t border-[#F9FAFB] pt-4">
-                  <Controller
-                    control={control}
-                    name="hour"
-                    render={({ field }) => (
-                      <Stepper label="Hour" value={field.value} min={0} max={23} formatValue={pad2} onChange={field.onChange} />
-                    )}
-                  />
-                  <Controller
-                    control={control}
-                    name="minute"
-                    render={({ field }) => (
-                      <Stepper label="Minute" value={field.value} min={0} max={59} step={5} formatValue={pad2} onChange={field.onChange} />
-                    )}
-                  />
-                </View>
-              </FormSection>
-            </>
-          ) : null}
+          <FormSection title="Payouts (optional)">
+            <View className="flex-row items-start gap-3">
+              <Ionicons
+                name={payoutsReady ? 'checkmark-circle' : 'card-outline'}
+                size={20}
+                color={payoutsReady ? colors.primary : colors.muted}
+              />
+              <View className="flex-1">
+                <Text className="font-sans-bold text-sm text-ink">Pitch money</Text>
+                <Text className="mt-1 font-sans text-xs text-muted">
+                  {payoutsReady
+                    ? 'Payouts are set up. This group can charge to join as soon as you create it.'
+                    : 'Set up Stripe payouts now if you will charge players to join. You can also do this later.'}
+                </Text>
+              </View>
+            </View>
+            {payoutsError ? <Text className="font-sans-medium text-xs text-danger">{payoutsError}</Text> : null}
+            {!payoutsReady ? (
+              <PrimaryButton
+                label={connectSetupButtonLabel(payoutsStatus)}
+                variant="outline"
+                loading={payoutsWorking}
+                onPress={() => void onSetupPayouts()}
+              />
+            ) : null}
+          </FormSection>
 
           {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
-
-      <View
-        className="absolute bottom-0 left-0 right-0 border-t border-border bg-white px-4 pt-4"
-        style={{ paddingBottom: Math.max(insets.bottom, 24) }}
-      >
-        <PrimaryButton label="Create Group" loading={submitting} disabled={!isValid} onPress={onSubmit} />
+        </KeyboardAwareScrollView>
+        <FormFooter>
+          <PrimaryButton label="Create Group" loading={submitting} disabled={!isValid} onPress={onSubmit} />
+        </FormFooter>
       </View>
     </View>
   );

@@ -16,6 +16,7 @@ import {
   voteMotm as voteMotmRequest,
   moveGamePlayerTeam as moveGamePlayerTeamRequest,
 } from './api';
+import { payToJoinGame } from '../payments/api';
 import type { CreateGameFormValues } from './schemas';
 import type { GamePlayerModel } from './types';
 
@@ -197,11 +198,25 @@ export function useJoinLeaveGame(gameId: string | undefined) {
     await refetchGame();
   }, [gameId, refetchGame]);
 
-  const leave = useCallback(async () => {
+  const payAndJoin = useCallback(async () => {
     if (!gameId) return;
     setError(null);
     setPending(true);
-    const result = await leaveGameRequest(gameId);
+    const result = await payToJoinGame(gameId);
+    setPending(false);
+    if (result.error) {
+      if (result.error !== 'Payment cancelled') setError(result.error);
+      await refetchGame();
+      return;
+    }
+    await refetchGame();
+  }, [gameId, refetchGame]);
+
+  const leave = useCallback(async (paid = false) => {
+    if (!gameId) return;
+    setError(null);
+    setPending(true);
+    const result = await leaveGameRequest(gameId, { paid });
     setPending(false);
     if (result.error) {
       setError(result.error);
@@ -210,7 +225,7 @@ export function useJoinLeaveGame(gameId: string | undefined) {
     await refetchGame();
   }, [gameId, refetchGame]);
 
-  return { join, leave, pending, error };
+  return { join, payAndJoin, leave, pending, error };
 }
 
 /** Admin moves a confirmed player between home and away after teams are picked. */

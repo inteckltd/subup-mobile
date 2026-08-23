@@ -25,8 +25,12 @@ Set the same `EXPO_PUBLIC_*` values the app needs at build time (EAS Environment
 EXPO_PUBLIC_SUPABASE_URL
 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 EXPO_PUBLIC_SENTRY_DSN
+EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY
+EXPO_PUBLIC_INVITE_APP_URL   # public download / landing URL for WhatsApp + Messages share
 SENTRY_AUTH_TOKEN          # source maps via the Sentry Expo plugin
 ```
+
+`EXPO_PUBLIC_INVITE_APP_URL` is the client-side counterpart of the Edge Function secret `INVITE_APP_URL`. The app falls back to `https://pitchin.app` if it is unset.
 
 `SENTRY_ALLOW_FAILURE` is `true` on preview/production today so a missing token does not fail the build. Watch Sentry uploads before a real store ship.
 
@@ -39,7 +43,11 @@ supabase secrets set TWILIO_ACCOUNT_SID=ACxxxxxxxx
 supabase secrets set TWILIO_AUTH_TOKEN=xxxxxxxx
 supabase secrets set TWILIO_FROM_NUMBER=+44xxxxxxxxxx
 supabase secrets set INVITE_APP_URL=https://your-testflight-or-landing-url
+supabase secrets set STRIPE_SECRET_KEY=sk_test_...
+supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_...
 ```
+
+`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` stay on Edge Functions only. After deploying `stripe-webhooks`, add that URL in the Stripe sandbox Dashboard and paste the signing secret into `STRIPE_WEBHOOK_SECRET`.
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are injected by the platform.
 
@@ -56,6 +64,13 @@ supabase functions deploy delete-my-account
 supabase functions deploy apply-game-lock
 supabase functions deploy close-motm-votes
 supabase functions deploy send-score-reminders
+supabase functions deploy create-connect-account-link
+supabase functions deploy create-join-payment
+supabase functions deploy leave-paid-game
+supabase functions deploy refund-game-payments
+supabase functions deploy stripe-webhooks
+supabase functions deploy stripe-connect-redirect
+supabase functions deploy sync-connect-status
 ```
 
 ## Twilio
@@ -67,7 +82,7 @@ Same Account SID + Auth Token go in **two** places (never commit them):
 
 Trial: enable UK geo, verify destination numbers, expect the trial prefix. Production: paid sender, no trial prefix. Alphanumeric `PitchIn` needs a paid account.
 
-`INVITE_APP_URL` is the download link in invite texts (TestFlight, Play internal track, or a landing page).
+`INVITE_APP_URL` is the download link in invite texts (TestFlight, Play internal track, or a landing page). Set the same URL as `EXPO_PUBLIC_INVITE_APP_URL` in the mobile app / EAS so WhatsApp and Messages share the same link.
 
 ## Cron Vault (once per project)
 

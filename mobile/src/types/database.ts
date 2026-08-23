@@ -13,7 +13,7 @@ export type InviteStatus = 'pending' | 'accepted' | 'declined' | 'expired' | 'ca
 
 export type GameStatus = 'draft' | 'open' | 'full' | 'cancelled' | 'completed';
 
-export type PaymentStatus = 'unpaid' | 'paid' | 'cash' | 'waived' | 'refunded';
+export type PaymentStatus = 'unpaid' | 'pending' | 'paid' | 'cash' | 'waived' | 'refunded';
 
 export type LockHours = 24 | 48 | 72;
 
@@ -41,6 +41,7 @@ export type Group = {
   default_weekday: number | null;
   default_time: string | null;
   lock_hours: LockHours;
+  payout_user_id: string;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -97,6 +98,8 @@ export type Game = {
   score_reminder_sent_at: string | null;
   scored_by: string | null;
   scored_at: string | null;
+  treasurer_payout_id: string | null;
+  treasurer_paid_out_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -172,6 +175,8 @@ export type GroupDetailRow = {
   lock_hours: LockHours;
   role: GroupMemberRole;
   member_count: number;
+  payout_user_id: string;
+  payouts_ready: boolean;
 };
 
 /** Raw row shape returned by the `get_group_upcoming_games()` RPC — see 005_group_detail.sql. */
@@ -253,9 +258,25 @@ export type GameDetailRow = {
   my_motm_vote_user_id: string | null;
   teams_picked_at: string | null;
   spots_taken: number;
+  spots_paid: number;
   waitlist_count: number;
   has_joined: boolean;
   is_waitlisted: boolean;
+  is_admin: boolean;
+  my_payment_status: PaymentStatus | null;
+  my_pending_expires_at: string | null;
+  fee_cents: number;
+  total_cents: number;
+  payouts_ready: boolean;
+};
+
+export type GroupPayoutsRow = {
+  payout_user_id: string;
+  treasurer_name: string | null;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  transfers_enabled: boolean;
+  is_self: boolean;
   is_admin: boolean;
 };
 

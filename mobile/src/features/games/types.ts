@@ -44,10 +44,16 @@ export type GameDetailModel = {
   myMotmVoteUserId: string | null;
   teamsPickedAt: string | null;
   spotsTaken: number;
+  spotsPaid: number;
   waitlistCount: number;
   hasJoined: boolean;
   isWaitlisted: boolean;
   isAdmin: boolean;
+  myPaymentStatus: PaymentStatus | null;
+  myPendingExpiresAt: string | null;
+  feeCents: number;
+  totalCents: number;
+  payoutsReady: boolean;
 };
 
 export type MotmCandidateModel = {

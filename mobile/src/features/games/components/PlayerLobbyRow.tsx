@@ -30,10 +30,8 @@ function paymentBadge(status: GamePlayerModel['paymentStatus']): { label: string
   switch (status) {
     case 'paid':
       return { label: 'PAID', bg: 'rgba(11,110,79,0.1)', color: '#0B6E4F' };
-    case 'cash':
-      return { label: 'CASH', bg: 'rgba(184,242,54,0.2)', color: '#121212' };
-    case 'waived':
-      return { label: 'WAIVED', bg: '#EEF2FF', color: '#4338CA' };
+    case 'pending':
+      return { label: 'PAYING', bg: '#FEF3C7', color: '#B45309' };
     case 'refunded':
       return { label: 'REFUNDED', bg: '#F3F4F6', color: '#6B7280' };
     default:
@@ -130,7 +128,7 @@ export function PlayerLobbyRow({
           </View>
         ) : player.mmrDelta !== null ? (
           <MmrDeltaBadge delta={player.mmrDelta} />
-        ) : player.paymentStatus !== 'unpaid' ? (
+        ) : player.paymentStatus === 'paid' || player.paymentStatus === 'pending' ? (
           <View className="rounded px-2 py-1" style={{ backgroundColor: payment.bg }}>
             <Text className="font-sans-bold text-[10px] uppercase tracking-wide" style={{ color: payment.color }}>
               {payment.label}

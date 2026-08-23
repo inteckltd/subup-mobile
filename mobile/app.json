@@ -12,10 +12,12 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.inteck.pitchin",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["whatsapp"]
       }
     },
     "android": {
+      "softwareKeyboardLayoutMode": "pan",
       "package": "com.inteck.pitchin",
       "adaptiveIcon": {
         "backgroundColor": "#0B6E4F",
@@ -65,7 +67,15 @@
           "organization": "inteck",
           "project": "pitchin"
         }
-      ]
+      ],
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.inteck.pitchin",
+          "enableGooglePay": true
+        }
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

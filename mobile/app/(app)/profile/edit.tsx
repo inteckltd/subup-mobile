@@ -4,23 +4,24 @@ import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Alert, Pressable, Text, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
 import { TextField } from '../../../src/features/auth/components/TextField';
-import { Avatar } from '../../../src/features/home/components/Avatar';
 import { OtpInput } from '../../../src/features/auth/components/OtpInput';
+import { FormFooter } from '../../../src/features/groups/components/FormFooter';
+import { Avatar } from '../../../src/features/home/components/Avatar';
 import { changePassword, confirmMobileChange, requestMobileChangeOtp, updateProfileFields, uploadAvatar } from '../../../src/features/profile/api';
 import { editProfileSchema, type EditProfileFormValues } from '../../../src/features/profile/schemas';
-import { normalizeUkMobile, ukMobileNationalDigits } from '../../../src/lib/phone';
+import { nationaliseUkMobileInput, normalizeUkMobile, ukMobileNationalDigits } from '../../../src/lib/phone';
 import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
 
 export default function EditProfileScreen() {
   const { profile, session, refreshProfile } = useAuth();
-  const insets = useSafeAreaInsets();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pendingMobile, setPendingMobile] = useState<string | null>(null);
@@ -99,7 +100,8 @@ export default function EditProfileScreen() {
       }
 
       const nextMobile = normalizeUkMobile(values.mobile);
-      if (nextMobile && nextMobile !== profile.mobile) {
+      const currentMobile = normalizeUkMobile(profile.mobile ?? '');
+      if (nextMobile && nextMobile !== currentMobile) {
         if (pendingMobile === nextMobile && mobileCode.length === 6) {
           const confirmed = await confirmMobileChange(nextMobile, mobileCode);
           if (confirmed.error) {
@@ -155,10 +157,12 @@ export default function EditProfileScreen() {
         </View>
       </SafeAreaView>
 
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
+      <View className="flex-1">
+        <KeyboardAwareScrollView
+          style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          bottomOffset={88}
           contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 32 }}
         >
           <View className="items-center">
@@ -212,9 +216,13 @@ export default function EditProfileScreen() {
                   icon="call-outline"
                   keyboardType="phone-pad"
                   placeholder="07912 345678"
+                  textContentType="telephoneNumber"
                   value={field.value}
                   onChangeText={field.onChange}
-                  onBlur={field.onBlur}
+                  onBlur={() => {
+                    field.onChange(nationaliseUkMobileInput(field.value));
+                    field.onBlur();
+                  }}
                   error={errors.mobile?.message}
                 />
               )}
@@ -269,13 +277,11 @@ export default function EditProfileScreen() {
           ) : null}
 
           {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
-
-          <View className="gap-3 pt-4">
-            <PrimaryButton label="Save Changes" loading={submitting} onPress={onSubmit} />
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-      <View style={{ height: insets.bottom }} />
+        </KeyboardAwareScrollView>
+        <FormFooter>
+          <PrimaryButton label="Save Changes" loading={submitting} onPress={onSubmit} />
+        </FormFooter>
+      </View>
     </View>
   );
 }

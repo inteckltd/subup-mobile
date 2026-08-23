@@ -1,10 +1,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Pressable, Text, TextInput, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
 import { TextField } from '../../../src/features/auth/components/TextField';
@@ -14,17 +16,23 @@ import { GroupSelect } from '../../../src/features/games/components/GroupSelect'
 import { TeamColorSelector } from '../../../src/features/games/components/TeamColorSelector';
 import { ToggleRow } from '../../../src/features/games/components/ToggleRow';
 import { useCreatableGroups, useCreateGame, useGameDetail, useUpdateGame } from '../../../src/features/games/hooks';
+import { connectAccountReady, fetchGroupPayouts, invalidatePayoutsQueries, syncConnectStatus } from '../../../src/features/payments/api';
+import { pitchinServiceFeeCents, playerTotalCents } from '../../../src/features/payments/fees';
 import {
   CreateGameFormValues,
   centsToPounds,
+  poundsToCents,
   createGameDefaultValues,
   createGameSchemaForLock,
   nextOccurrenceOfWeekdayTime,
   teamColorById,
 } from '../../../src/features/games/schemas';
+import { FormFooter } from '../../../src/features/groups/components/FormFooter';
 import { FormSection } from '../../../src/features/groups/components/FormSection';
 import { Stepper } from '../../../src/features/groups/components/Stepper';
+import { formatGbp } from '../../../src/lib/format';
 import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
+import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
 
 function formatDateInput(date: Date): string {
@@ -37,7 +45,8 @@ function formatTimeInput(date: Date): string {
 
 export default function CreateGameScreen() {
   const { groupId: groupIdParam, editId } = useLocalSearchParams<{ groupId?: string; editId?: string }>();
-  const insets = useSafeAreaInsets();
+  const { session } = useAuth();
+  const queryClient = useQueryClient();
   const groupsQuery = useCreatableGroups();
   const { submit, submitting, error: createError } = useCreateGame();
   const { submit: updateSubmit, submitting: updating, error: updateError } = useUpdateGame();
@@ -47,7 +56,6 @@ export default function CreateGameScreen() {
   const groups = groupsQuery.data ?? [];
   const lockHoursRef = useRef<number | null>(null);
   const didPrefillEdit = useRef(false);
-  const [showMore, setShowMore] = useState(!!editId);
 
   const {
     control,
@@ -64,10 +72,28 @@ export default function CreateGameScreen() {
   });
 
   const watchedGroupId = watch('groupId');
+  const watchedPrice = watch('pricePounds');
   const selectedGroup = groups.find((group) => group.id === watchedGroupId);
+  const payoutsQuery = useQuery({
+    queryKey: ['group', watchedGroupId, 'payouts', session?.user.id],
+    queryFn: () => fetchGroupPayouts(watchedGroupId),
+    enabled: !!session && !!watchedGroupId,
+  });
+  const payoutsReady = payoutsQuery.data ? connectAccountReady(payoutsQuery.data) : false;
+  const priceCents = poundsToCents(watchedPrice ?? 0);
   lockHoursRef.current = selectedGroup?.lockHours ?? editQuery.data?.cancelIfMinNotMetHours ?? null;
   const submitError = createError || updateError;
   const { allowLeave } = useUnsavedChangesGuard(isDirty);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!session || !watchedGroupId) return;
+      void (async () => {
+        await syncConnectStatus();
+        await invalidatePayoutsQueries(queryClient);
+      })();
+    }, [session, watchedGroupId, queryClient]),
+  );
 
   // Preselects the group passed in from Group Details' "Create game" CTA,
   // once the creatable-groups list has loaded and confirms the caller
@@ -108,6 +134,7 @@ export default function CreateGameScreen() {
     didPrefillEdit.current = true;
     const kickoff = new Date(game.startsAt);
     setValue('groupId', game.groupId, { shouldValidate: true });
+    setValue('title', game.title ?? '', { shouldValidate: true });
     setValue('date', kickoff, { shouldValidate: true });
     setValue('time', kickoff, { shouldValidate: true });
     setValue('venueName', game.venueName ?? '');
@@ -126,6 +153,10 @@ export default function CreateGameScreen() {
   }, [selectedGroup?.lockHours, trigger]);
 
   const onSubmit = handleSubmit(async (values) => {
+    if (poundsToCents(values.pricePounds) > 0 && !payoutsReady && watchedGroupId) {
+      router.push(`/group/payouts?groupId=${watchedGroupId}`);
+      return;
+    }
     if (isEditing && editId) {
       const ok = await updateSubmit(editId, values);
       if (ok) {
@@ -158,11 +189,13 @@ export default function CreateGameScreen() {
         </View>
       </SafeAreaView>
 
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
+      <View className="flex-1">
+        <KeyboardAwareScrollView
+          style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 20, paddingBottom: 140, gap: 24 }}
+          bottomOffset={88}
+          contentContainerStyle={{ padding: 20, paddingBottom: 24, gap: 24 }}
         >
           <FormSection title="Game details">
             <View className="w-full gap-1.5">
@@ -178,6 +211,23 @@ export default function CreateGameScreen() {
               )}
               {errors.groupId ? <Text className="font-sans-medium text-xs text-danger">{errors.groupId.message}</Text> : null}
             </View>
+
+            <Controller
+              control={control}
+              name="title"
+              render={({ field }) => (
+                <TextField
+                  label="Game name"
+                  icon="football-outline"
+                  placeholder="Sunday kickabout"
+                  autoCapitalize="words"
+                  value={field.value}
+                  onChangeText={field.onChange}
+                  onBlur={field.onBlur}
+                  error={errors.title?.message}
+                />
+              )}
+            />
 
             <View className="w-full gap-1.5">
               <View className="w-full flex-row gap-3">
@@ -288,7 +338,9 @@ export default function CreateGameScreen() {
 
             <View className="w-full gap-1.5 border-t border-[#F9FAFB] pt-3">
               <Text className="font-sans-bold text-xs text-muted">Pitch cost per player</Text>
-              <Text className="font-sans text-[10px] text-muted">Shown to players — pay on the day. Card pay comes later.</Text>
+              <Text className="font-sans text-[10px] text-muted">
+                You receive this amount. Players pay this plus a PitchIn fee in the app.
+              </Text>
               <Controller
                 control={control}
                 name="pricePounds"
@@ -312,72 +364,79 @@ export default function CreateGameScreen() {
                 )}
               />
               {errors.pricePounds ? <Text className="font-sans-medium text-xs text-danger">{errors.pricePounds.message}</Text> : null}
+              {priceCents > 0 ? (
+                <Text className="font-sans text-[10px] text-muted">
+                  Players pay {formatGbp(playerTotalCents(priceCents))} ({formatGbp(priceCents)} +{' '}
+                  {formatGbp(pitchinServiceFeeCents(priceCents))} PitchIn fee)
+                </Text>
+              ) : null}
+              {priceCents > 0 && !payoutsReady && watchedGroupId ? (
+                <View className="mt-1 gap-2 rounded-xl border border-danger/30 bg-danger/5 px-3 py-3">
+                  <Text className="font-sans-bold text-sm text-danger">Payouts are not set up</Text>
+                  <Text className="font-sans text-xs text-danger">
+                    This group needs a Stripe payouts profile before you can create a paid game. Set that up first, then come back.
+                  </Text>
+                  <Pressable
+                    onPress={() => router.push(`/group/payouts?groupId=${watchedGroupId}`)}
+                    className="mt-1 items-center rounded-full bg-danger px-4 py-2.5"
+                  >
+                    <Text className="font-sans-bold text-xs text-white">Set up payouts</Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           </FormSection>
 
-          <Pressable onPress={() => setShowMore((open) => !open)} className="flex-row items-center justify-between py-1">
-            <Text className="font-sans-bold text-sm text-primary">{showMore ? 'Hide options' : 'More options'}</Text>
-            <Ionicons name={showMore ? 'chevron-up' : 'chevron-down'} size={16} color={colors.primary} />
-          </Pressable>
+          <FormSection title="Team colours">
+            <Text className="font-sans text-xs text-muted">
+              So players can tell teams apart on the day — used when the score gets entered too.
+            </Text>
+            <View className="w-full gap-1.5">
+              <Text className="font-sans-bold text-xs text-muted">Home</Text>
+              <Controller
+                control={control}
+                name="homeColor"
+                render={({ field }) => <TeamColorSelector value={field.value} onChange={field.onChange} />}
+              />
+            </View>
+            <View className="w-full gap-1.5 border-t border-[#F9FAFB] pt-3">
+              <Text className="font-sans-bold text-xs text-muted">Away</Text>
+              <Controller
+                control={control}
+                name="awayColor"
+                render={({ field }) => <TeamColorSelector value={field.value} onChange={field.onChange} />}
+              />
+            </View>
+            {errors.awayColor ? <Text className="font-sans-medium text-xs text-danger">{errors.awayColor.message}</Text> : null}
+          </FormSection>
 
-          {showMore ? (
-            <>
-              <FormSection title="Team colours">
-                <Text className="font-sans text-xs text-muted">
-                  So players can tell teams apart on the day — used when the score gets entered too.
-                </Text>
-                <View className="w-full gap-1.5">
-                  <Text className="font-sans-bold text-xs text-muted">Home</Text>
-                  <Controller
-                    control={control}
-                    name="homeColor"
-                    render={({ field }) => <TeamColorSelector value={field.value} onChange={field.onChange} />}
-                  />
-                </View>
-                <View className="w-full gap-1.5 border-t border-[#F9FAFB] pt-3">
-                  <Text className="font-sans-bold text-xs text-muted">Away</Text>
-                  <Controller
-                    control={control}
-                    name="awayColor"
-                    render={({ field }) => <TeamColorSelector value={field.value} onChange={field.onChange} />}
-                  />
-                </View>
-                {errors.awayColor ? <Text className="font-sans-medium text-xs text-danger">{errors.awayColor.message}</Text> : null}
-              </FormSection>
-
-              <View className="w-full rounded-2xl bg-white px-4 py-1" style={{ shadowColor: '#000000', shadowOpacity: 0.05, shadowRadius: 1, shadowOffset: { width: 0, height: 1 } }}>
-                <Controller
-                  control={control}
-                  name="allowWaitlist"
-                  render={({ field }) => (
-                    <ToggleRow
-                      icon="people-outline"
-                      iconBg="#EEF2FF"
-                      iconColor="#4338CA"
-                      label="Allow waitlist"
-                      value={field.value}
-                      onChange={field.onChange}
-                    />
-                  )}
+          <View className="w-full rounded-2xl bg-white px-4 py-1" style={{ shadowColor: '#000000', shadowOpacity: 0.05, shadowRadius: 1, shadowOffset: { width: 0, height: 1 } }}>
+            <Controller
+              control={control}
+              name="allowWaitlist"
+              render={({ field }) => (
+                <ToggleRow
+                  icon="people-outline"
+                  iconBg="#EEF2FF"
+                  iconColor="#4338CA"
+                  label="Allow waitlist"
+                  value={field.value}
+                  onChange={field.onChange}
                 />
-              </View>
-            </>
-          ) : null}
+              )}
+            />
+          </View>
 
           {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
-
-      <View
-        className="absolute bottom-0 left-0 right-0 border-t border-border bg-white px-4 pt-4"
-        style={{ paddingBottom: Math.max(insets.bottom, 24) }}
-      >
-        <PrimaryButton
-          label={isEditing ? 'Save changes' : 'Create Game'}
-          loading={submitting || updating}
-          disabled={!isValid || (!isEditing && groups.length === 0)}
-          onPress={onSubmit}
-        />
+        </KeyboardAwareScrollView>
+        <FormFooter>
+          <PrimaryButton
+            label={isEditing ? 'Save changes' : 'Create Game'}
+            loading={submitting || updating}
+            disabled={!isValid || (!isEditing && groups.length === 0)}
+            onPress={onSubmit}
+          />
+        </FormFooter>
       </View>
     </View>
   );

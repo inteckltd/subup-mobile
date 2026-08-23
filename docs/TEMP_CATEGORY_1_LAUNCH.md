@@ -4,10 +4,14 @@ Temporary list of work that is **still required** after the security / simplicit
 
 ## Money
 
-- [ ] Stripe: card pay on join, admin mark cash / waived, auto-cancel refunds
-- [ ] Decide **platform account vs Stripe Connect** (who receives pitch fees)
-- [ ] UK SCA / 3DS, webhook signature verification, no client-set `payment_status = paid`
-- [ ] Turn payment chips / cash toggle back on only when the above is live
+- [x] Stripe Connect + pay-to-join (no cash / waive). Code is in; sandbox keys + webhook still needed.
+- [x] Apply migrations `023`–`026` on the hosted project
+- [x] `supabase secrets set` `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET`
+- [x] `EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY` in mobile `.env` and EAS
+- [x] Deploy Edge Functions: `create-connect-account-link`, `create-join-payment`, `leave-paid-game`, `refund-game-payments`, `stripe-webhooks`, `stripe-connect-redirect`
+- [x] Stripe Dashboard: Connect Express (UK), webhook to `/functions/v1/stripe-webhooks` (`payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `charge.refunded`, `account.updated`)
+- [x] Apple Pay merchant ID `merchant.com.inteck.pitchin` in Apple Developer + Stripe (test cards work without this)
+- [ ] Rebuild a **dev client** (`expo-dev-client`) — Stripe native SDK will not run in Expo Go
 
 ## Legal and trust
 
@@ -27,10 +31,10 @@ Temporary list of work that is **still required** after the security / simplicit
 
 ## Ops
 
-- [ ] Production Twilio (not trial)
+- [-] Production Twilio (not trial)
 - [ ] EAS production secrets + `eas submit` credentials for both platforms
-- [ ] Cron Vault secrets on the production Supabase project
-- [ ] Confirm migrations through `022` on the hosted project
+- [-] Cron Vault secrets on the production Supabase project
+- [-] Confirm migrations through `022` on the hosted project
 - [ ] Watch Sentry source-map upload (`SENTRY_ALLOW_FAILURE` is still true)
 
 See [IOS_APP_STORE.md](IOS_APP_STORE.md) and [ANDROID_PLAY_STORE.md](ANDROID_PLAY_STORE.md).

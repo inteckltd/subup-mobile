@@ -10,7 +10,7 @@ import { Checkbox } from '../../src/features/auth/components/Checkbox';
 import { PrimaryButton } from '../../src/features/auth/components/PrimaryButton';
 import { TextField } from '../../src/features/auth/components/TextField';
 import { SignUpFormValues, signUpSchema } from '../../src/features/auth/schemas';
-import { normalizeUkMobile } from '../../src/lib/phone';
+import { nationaliseUkMobileInput, normalizeUkMobile } from '../../src/lib/phone';
 import { useAuth } from '../../src/providers/AuthProvider';
 
 export default function SignUpScreen() {
@@ -73,7 +73,7 @@ export default function SignUpScreen() {
           <TextField
             label="Full name"
             icon="person-outline"
-            placeholder="Ben Clarke"
+            placeholder="Your full name"
             autoCapitalize="words"
             textContentType="name"
             value={field.value}
@@ -90,7 +90,7 @@ export default function SignUpScreen() {
           <TextField
             label="Email address (optional)"
             icon="mail-outline"
-            placeholder="ben@example.com"
+            placeholder="you@example.com"
             autoCapitalize="none"
             keyboardType="email-address"
             textContentType="emailAddress"
@@ -113,7 +113,10 @@ export default function SignUpScreen() {
             textContentType="telephoneNumber"
             value={field.value}
             onChangeText={field.onChange}
-            onBlur={field.onBlur}
+            onBlur={() => {
+              field.onChange(nationaliseUkMobileInput(field.value));
+              field.onBlur();
+            }}
             error={errors.mobile?.message}
           />
         )}

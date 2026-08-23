@@ -55,7 +55,7 @@ export default function GameDetailsScreen() {
   const gameQuery = useGameDetail(id);
   const playersQuery = useGamePlayers(id);
   const { refreshing, refresh } = useGameDetailRefresh(id);
-  const { join, leave, pending, error: actionError } = useJoinLeaveGame(id);
+  const { join, payAndJoin, leave, pending, error: actionError } = useJoinLeaveGame(id);
   const { cancel, pending: cancelling, error: cancelError } = useCancelGame(id);
   const { move, error: moveError } = useMoveGamePlayerTeam(id);
 
@@ -94,7 +94,7 @@ export default function GameDetailsScreen() {
   const lockHours = game.cancelIfMinNotMetHours ?? 24;
   const percentFull = game.maxPlayers > 0 ? Math.min(game.spotsTaken / game.maxPlayers, 1) : 0;
   const insideLock = isInsideLockWindow(game.startsAt, lockHours, now);
-  const minMet = game.spotsTaken >= game.minPlayers;
+  const minMet = (game.spotsPaid ?? 0) >= game.minPlayers;
   const teamsPicked = !!game.teamsPickedAt;
   const confirmed = (insideLock && minMet) || teamsPicked;
   const isCancelled = game.status === 'cancelled';
@@ -165,7 +165,9 @@ export default function GameDetailsScreen() {
                     onPress: () => {
                       Alert.alert(
                         'Cancel this game?',
-                        'Everyone who joined will be notified. You can’t undo this.',
+                        current.teamsPickedAt || insideLockNow
+                          ? 'Everyone who joined will be notified. This game has locked, so paid players are not refunded. You can’t undo this.'
+                          : 'Everyone who joined will be notified. Paid players are refunded. You can’t undo this.',
                         [
                           { text: 'Keep game', style: 'cancel' },
                           {
@@ -252,11 +254,19 @@ export default function GameDetailsScreen() {
               </View>
               <View className="h-8 w-px bg-white/20" />
               <View className="items-end">
-                <Text className="font-sans-bold text-[10px] uppercase tracking-wider text-white/60">Price</Text>
-                <Text className="font-sans-bold text-lg text-white">{formatGbp(game.priceCents)}</Text>
+                <Text className="font-sans-bold text-[10px] uppercase tracking-wider text-white/60">
+                  {game.priceCents > 0 ? 'You pay' : 'Price'}
+                </Text>
+                <Text className="font-sans-bold text-lg text-white">{formatGbp(game.totalCents ?? game.priceCents)}</Text>
               </View>
             </View>
           )}
+
+          {game.priceCents > 0 ? (
+            <Text className="font-sans text-xs text-muted">
+              {formatGbp(game.priceCents)} pitch + {formatGbp(game.feeCents ?? 0)} PitchIn fee
+            </Text>
+          ) : null}
 
           {game.venueName ? (
             <View className="flex-row items-start gap-3">
@@ -445,8 +455,20 @@ export default function GameDetailsScreen() {
               <Ionicons name="hourglass-outline" size={14} color={colors.muted} />
               <Text className="font-sans-bold text-sm text-muted">Score not yet entered</Text>
             </View>
+          ) : canJoinOpen && game.priceCents > 0 ? (
+            <PrimaryButton
+              label={`Pay ${formatGbp(game.totalCents)} to join`}
+              loading={pending}
+              onPress={payAndJoin}
+            />
           ) : canJoinOpen ? (
             <PrimaryButton label="Join Game" loading={pending} onPress={join} />
+          ) : game.hasJoined && game.myPaymentStatus === 'pending' && !game.isWaitlisted ? (
+            <PrimaryButton
+              label={`Pay ${formatGbp(game.totalCents)} to stay in`}
+              loading={pending}
+              onPress={payAndJoin}
+            />
           ) : canJoinWaitlist ? (
             <PrimaryButton label="Join Waitlist" loading={pending} onPress={join} />
           ) : isFullNoWaitlist ? (
@@ -470,7 +492,7 @@ export default function GameDetailsScreen() {
               label={game.isWaitlisted ? 'Leave Waitlist' : 'Leave Game'}
               variant="outline"
               loading={pending}
-              onPress={leave}
+              onPress={() => leave(game.priceCents > 0 && !game.isWaitlisted)}
             />
           ) : isCancelled ? (
             <PrimaryButton label="Game cancelled" disabled />

@@ -6,6 +6,7 @@ A stolen **publishable / anon key is expected** (it ships in the app). Defence i
 
 - `anon` is revoked on domain tables. `is_email_taken` is granted to `anon` (boolean only) and is **rate-limited**.
 - Game, membership, invite, and score **writes** go through `SECURITY DEFINER` RPCs (`search_path = public, pg_temp`). Direct INSERT/UPDATE/DELETE policies on `games`, `game_players`, `group_members`, and `group_invites` are dropped.
+- `game_payments` has no client grants. `stripe_accounts` is own-row SELECT only. `payment_status = paid` is set only by the Stripe webhook (service role).
 - `groups` keeps client INSERT (create group + trigger adds the admin). Updates go through `update_group`.
 - Profile stats and `profiles.mobile` cannot be updated by the role `authenticated` (triggers). Mobile changes use `update-my-mobile` (OTP) or `confirm_my_mobile` after Auth OTP.
 - Group-mates cannot `SELECT` another profile’s mobile or email. Rosters use `get_group_members` / `get_game_lobby_players`.
@@ -29,7 +30,7 @@ Invite SMS is **once per invite** (`group_invites.sms_sent_at`). Repeat POSTs to
 
 User-facing functions verify the JWT with the anon key, then use `service_role` only if the caller can see the row under RLS.
 
-Cron functions (`apply-game-lock`, `close-motm-votes`, `send-score-reminders`) have `verify_jwt = false` in `supabase/config.toml` and compare `x-cron-secret` in constant time. Do not add more unverified functions.
+Cron functions (`apply-game-lock`, `close-motm-votes`, `send-score-reminders`) have `verify_jwt = false` in `supabase/config.toml` and compare `x-cron-secret` in constant time. `stripe-webhooks` is also `verify_jwt = false` and checks the Stripe signature instead. Do not add more unverified functions.
 
 CORS is `*` while the only client is native. Lock this down if you add a browser app.
 
@@ -41,10 +42,10 @@ CORS is `*` while the only client is native. Lock this down if you add a browser
 
 ## Checklist on the live project
 
-- [ ] Migrations through `022` applied
+- [ ] Migrations through `026` applied
 - [ ] Dashboard auth rate limits left on
 - [ ] Confirm phone **off**
 - [ ] Twilio not in trial for production SMS
 - [ ] `CRON_SECRET` + Vault URLs set
-- [ ] No extra `verify_jwt = false` functions
+- [ ] No extra `verify_jwt = false` functions beyond cron + `stripe-webhooks`
 - [ ] Service role key never in the mobile app or git
