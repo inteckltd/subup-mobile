@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { ScrollView, Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,10 +25,13 @@ export default function NotificationsScreen() {
   const { remove, error: deleteError } = useDeleteNotification();
   const rows = query.data ?? [];
   const error = inviteError || deleteError;
+  const [newIds, setNewIds] = useState<Set<string> | null>(null);
 
   useEffect(() => {
+    if (query.isPending || query.isError || !query.data || newIds) return;
+    setNewIds(new Set(query.data.filter((row) => !row.readAt).map((row) => row.id)));
     void markRead();
-  }, [markRead]);
+  }, [query.data, query.isPending, query.isError, markRead, newIds]);
 
   return (
     <View className="flex-1 bg-background">
@@ -59,6 +62,7 @@ export default function NotificationsScreen() {
             <NotificationRow
               key={row.id}
               row={row}
+              isNew={newIds?.has(row.id) ?? !row.readAt}
               pending={pending}
               onAccept={accept}
               onDecline={decline}
@@ -74,13 +78,14 @@ export default function NotificationsScreen() {
 
 type NotificationRowProps = {
   row: NotificationModel;
+  isNew: boolean;
   pending: boolean;
   onAccept: (inviteId: string) => Promise<boolean>;
   onDecline: (inviteId: string) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
 };
 
-function NotificationRow({ row, pending, onAccept, onDecline, onDelete }: NotificationRowProps) {
+function NotificationRow({ row, isNew, pending, onAccept, onDecline, onDelete }: NotificationRowProps) {
   const deletingRef = useRef(false);
   const inviteId = typeof row.data.inviteId === 'string' ? row.data.inviteId : null;
   const isInvite = row.type === 'group_invite' && inviteId;
@@ -108,7 +113,7 @@ function NotificationRow({ row, pending, onAccept, onDecline, onDelete }: Notifi
         </Pressable>
       )}
     >
-      <View className="gap-3 rounded-2xl border border-border bg-white p-4">
+      <View className={`gap-3 rounded-2xl border p-4 ${isNew ? 'border-primary/40 bg-accent/20' : 'border-border bg-white'}`}>
         <Text className="font-sans-bold text-sm text-ink">{row.title}</Text>
         {row.body ? <Text className="font-sans text-xs text-muted">{row.body}</Text> : null}
         <Text className="font-sans text-[10px] text-muted">{formatUkDate(row.createdAt)}</Text>

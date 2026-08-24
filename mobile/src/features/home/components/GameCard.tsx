@@ -34,6 +34,9 @@ export function GameCard({ game, onPress, onPressJoin }: GameCardProps) {
       <Text className="pt-2 font-sans-bold text-base text-ink" numberOfLines={1}>
         {game.title || game.groupName}
       </Text>
+      <Text className="font-sans text-xs text-muted" numberOfLines={1}>
+        {game.groupName}
+      </Text>
 
       {venueLabel ? (
         <View className="flex-row items-center gap-1">

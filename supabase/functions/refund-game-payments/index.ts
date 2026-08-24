@@ -1,5 +1,6 @@
 // Refund every succeeded payment on a cancelled game. JWT caller must be
 // able to see the game (member). Used after cancel_game and by apply-game-lock.
+// Skips once the game has started or the treasurer bank payout has been created.
 
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
@@ -41,11 +42,12 @@ Deno.serve(async (req) => {
     const service = createServiceClient(supabaseUrl, serviceRoleKey);
     const { data: locked } = await service
       .from('games')
-      .select('teams_picked_at, treasurer_payout_id')
+      .select('starts_at, treasurer_payout_id')
       .eq('id', gameId)
       .maybeSingle();
-    if (locked?.teams_picked_at || locked?.treasurer_payout_id) {
-      return jsonResponse({ ok: true, refunded: 0, skipped: 'locked' });
+    const started = locked?.starts_at ? new Date(locked.starts_at).getTime() <= Date.now() : false;
+    if (locked?.treasurer_payout_id || started) {
+      return jsonResponse({ ok: true, refunded: 0, skipped: 'started' });
     }
     const refunded = await refundSucceededPayments(service, stripe, gameId);
     return jsonResponse({ ok: true, refunded });

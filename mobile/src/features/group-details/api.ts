@@ -171,7 +171,11 @@ export async function fetchGroupHistory(groupId: string): Promise<GroupHistoryMo
   }));
 }
 
-export async function inviteGroupMember(groupId: string, mobileInput: string): Promise<{ inviteId?: string; error?: string }> {
+export async function inviteGroupMember(
+  groupId: string,
+  mobileInput: string,
+  options?: { skipSms?: boolean },
+): Promise<{ inviteId?: string; existingUser?: boolean; error?: string }> {
   const mobile = normalizeUkMobile(mobileInput);
   if (!mobile) return { error: 'Enter a valid UK mobile number' };
 
@@ -179,14 +183,23 @@ export async function inviteGroupMember(groupId: string, mobileInput: string): P
   if (error) return { error: mutationError(error, "Couldn't send that invite.") };
 
   const inviteId = (Array.isArray(data) ? data[0] : data) as string | null;
+  let existingUser = false;
   if (inviteId) {
+    const { data: invite } = await supabase
+      .from('group_invites')
+      .select('invited_user_id')
+      .eq('id', inviteId)
+      .maybeSingle();
+    existingUser = Boolean(invite?.invited_user_id);
     try {
-      await supabase.functions.invoke('notify-group-invite', { body: { inviteId } });
+      await supabase.functions.invoke('notify-group-invite', {
+        body: { inviteId, skipSms: options?.skipSms === true },
+      });
     } catch (pushError) {
       console.error('[group-details] notify-group-invite failed', pushError);
     }
   }
-  return { inviteId: inviteId ?? undefined };
+  return { inviteId: inviteId ?? undefined, existingUser };
 }
 
 export async function leaveGroup(groupId: string): Promise<{ error?: string }> {

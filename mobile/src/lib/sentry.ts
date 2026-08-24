@@ -37,7 +37,15 @@ export function isExpectedClientError(error: unknown): boolean {
     const code = String((error as { code: unknown }).code ?? '');
     if (EXPECTED_AUTH_CODES.has(code)) return true;
   }
-  return EXPECTED_AUTH_MESSAGE.test(errorText(error));
+  const text = errorText(error);
+  if (/AuthRetryableFetchError|network connection was lost/i.test(text)) return true;
+  return EXPECTED_AUTH_MESSAGE.test(text);
+}
+
+function exceptionText(event: Sentry.ErrorEvent): string {
+  return (event.exception?.values ?? [])
+    .map((value) => `${value.type ?? ''} ${value.value ?? ''}`)
+    .join(' ');
 }
 
 function isSimulatorAppHang(event: Sentry.ErrorEvent): boolean {
@@ -45,8 +53,13 @@ function isSimulatorAppHang(event: Sentry.ErrorEvent): boolean {
     ? Boolean((event.contexts.device as { simulator?: boolean }).simulator)
     : false;
   if (!simulator) return false;
-  const values = event.exception?.values ?? [];
-  return values.some((value) => /app hang/i.test(`${value.type ?? ''} ${value.value ?? ''}`));
+  return /app hang/i.test(exceptionText(event));
+}
+
+/** Transient auth fetch failures (dropped Wi-Fi, etc.) — not actionable. */
+function isRetryableNetworkAuthError(event: Sentry.ErrorEvent): boolean {
+  const text = exceptionText(event);
+  return /AuthRetryableFetchError/i.test(text) || /network connection was lost/i.test(text);
 }
 
 export function initSentry() {
@@ -57,9 +70,9 @@ export function initSentry() {
     enableAutoSessionTracking: true,
     enableAppHangTracking: !__DEV__,
     appHangTimeoutInterval: 5,
-    ignoreErrors: ['Invalid login credentials'],
+    ignoreErrors: ['Invalid login credentials', 'AuthRetryableFetchError'],
     beforeSend(event) {
-      if (isSimulatorAppHang(event)) return null;
+      if (isSimulatorAppHang(event) || isRetryableNetworkAuthError(event)) return null;
       return event;
     },
   });

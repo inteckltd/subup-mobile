@@ -40,6 +40,7 @@ export default function InviteMemberScreen() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [sharingWhatsApp, setSharingWhatsApp] = useState(false);
 
   const {
     control,
@@ -64,11 +65,36 @@ export default function InviteMemberScreen() {
   });
 
   const onShareWhatsApp = async () => {
+    if (!groupId || !session) return;
     setShareError(null);
+    if (!isValidUkMobile(mobileValue)) {
+      setShareError('Enter a valid UK mobile number');
+      return;
+    }
+    setSharingWhatsApp(true);
     try {
-      await shareInviteViaWhatsApp(shareMessage, mobileValue);
-    } catch {
-      setShareError("Couldn't open WhatsApp.");
+      const result = await inviteGroupMember(groupId, mobileValue, { skipSms: true });
+      if (result.error) {
+        setShareError(result.error);
+        return;
+      }
+      const message = buildInviteShareMessage({
+        firstName: inviteShareFirstName(profile?.full_name),
+        groupName: groupQuery.data?.name ?? 'a group',
+        url: env.EXPO_PUBLIC_INVITE_APP_URL,
+        existingUser: result.existingUser,
+      });
+      try {
+        await shareInviteViaWhatsApp(message, mobileValue);
+      } catch {
+        setShareError("Invite sent, but couldn't open WhatsApp.");
+      }
+      await queryClient.invalidateQueries({ queryKey: ['group', groupId, 'invites', session.user.id] });
+      await queryClient.invalidateQueries({ queryKey: ['home', 'pending-invites', session.user.id] });
+      reset({ mobile: '' });
+      allowLeave();
+    } finally {
+      setSharingWhatsApp(false);
     }
   };
 
@@ -162,16 +188,24 @@ export default function InviteMemberScreen() {
                 <View className="h-px flex-1 bg-border" />
               </View>
               <Text className="font-sans text-sm text-muted">
-                Sharing a download link does not add them to the group — invite by mobile so they can accept in
-                PitchIn.
+                WhatsApp sends a real invite for this number. Existing members get an in-app notification; new
+                numbers get a download link. Messages only shares a download link and does not add them to the
+                group.
               </Text>
               <View className="flex-row gap-3">
                 <Pressable
-                  onPress={onShareWhatsApp}
+                  onPress={() => void onShareWhatsApp()}
+                  disabled={sharingWhatsApp || submitting || !isValid}
                   className="flex-1 flex-row items-center justify-center gap-2 rounded-2xl border border-border bg-white py-3.5"
                 >
-                  <Ionicons name="logo-whatsapp" size={18} color={colors.ink} />
-                  <Text className="font-sans-bold text-sm text-ink">WhatsApp</Text>
+                  {sharingWhatsApp ? (
+                    <ActivityIndicator color={colors.ink} />
+                  ) : (
+                    <>
+                      <Ionicons name="logo-whatsapp" size={18} color={colors.ink} />
+                      <Text className="font-sans-bold text-sm text-ink">WhatsApp</Text>
+                    </>
+                  )}
                 </Pressable>
                 <Pressable
                   onPress={onShareMessages}
@@ -185,7 +219,7 @@ export default function InviteMemberScreen() {
             </View>
           </KeyboardAwareScrollView>
           <FormFooter>
-            <PrimaryButton label="Invite Member" loading={submitting} disabled={!isValid} onPress={onSubmit} />
+            <PrimaryButton label="Invite Member" loading={submitting} disabled={!isValid || sharingWhatsApp} onPress={onSubmit} />
           </FormFooter>
         </View>
       )}

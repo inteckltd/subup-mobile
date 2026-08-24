@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { isValidUkMobile } from '../../lib/phone';
 
-export const TERMS_VERSION = '1.2';
+export const TERMS_VERSION = '1.3';
 export const PRIVACY_VERSION = '1.2';
 
 const ukMobile = z

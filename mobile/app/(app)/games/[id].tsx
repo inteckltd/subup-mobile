@@ -47,6 +47,20 @@ function PlayerList({ players }: { players: GamePlayerModel[] }) {
   );
 }
 
+function confirmLeaveGame(input: { isWaitlisted: boolean; paid: boolean; onLeave: () => void }) {
+  const title = input.isWaitlisted ? 'Leave the waitlist?' : 'Leave this game?';
+  let message: string | undefined;
+  if (!input.isWaitlisted) {
+    message = input.paid
+      ? 'Are you sure you want to leave? A refund will be processed for the pitch cost and PitchIn fee.'
+      : 'Are you sure you want to leave this game?';
+  }
+  Alert.alert(title, message, [
+    { text: 'Stay', style: 'cancel' },
+    { text: 'Leave', style: 'destructive', onPress: input.onLeave },
+  ]);
+}
+
 export default function GameDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
@@ -165,9 +179,7 @@ export default function GameDetailsScreen() {
                     onPress: () => {
                       Alert.alert(
                         'Cancel this game?',
-                        current.teamsPickedAt || insideLockNow
-                          ? 'Everyone who joined will be notified. This game has locked, so paid players are not refunded. You can’t undo this.'
-                          : 'Everyone who joined will be notified. Paid players are refunded. You can’t undo this.',
+                        'Everyone who joined will be notified. Paid players are refunded. You can’t undo this.',
                         [
                           { text: 'Keep game', style: 'cancel' },
                           {
@@ -212,6 +224,9 @@ export default function GameDetailsScreen() {
             <View className="flex-1">
               <Text className="font-sans-bold text-xl text-ink" numberOfLines={2}>
                 {game.title || game.groupName}
+              </Text>
+              <Text className="font-sans text-sm text-muted" numberOfLines={1}>
+                {game.groupName}
               </Text>
               <Text className="font-sans text-sm text-muted">{formatLobbyDateTime(game.startsAt)}</Text>
             </View>
@@ -492,7 +507,14 @@ export default function GameDetailsScreen() {
               label={game.isWaitlisted ? 'Leave Waitlist' : 'Leave Game'}
               variant="outline"
               loading={pending}
-              onPress={() => leave(game.priceCents > 0 && !game.isWaitlisted)}
+              onPress={() => {
+                const paid = game.priceCents > 0 && !game.isWaitlisted;
+                confirmLeaveGame({
+                  isWaitlisted: game.isWaitlisted,
+                  paid,
+                  onLeave: () => leave(paid),
+                });
+              }}
             />
           ) : isCancelled ? (
             <PrimaryButton label="Game cancelled" disabled />

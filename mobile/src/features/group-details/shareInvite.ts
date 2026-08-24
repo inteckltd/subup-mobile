@@ -7,7 +7,15 @@ export function inviteShareFirstName(fullName: string | null | undefined): strin
   return part || 'A teammate';
 }
 
-export function buildInviteShareMessage(input: { firstName: string; groupName: string; url: string }): string {
+export function buildInviteShareMessage(input: {
+  firstName: string;
+  groupName: string;
+  url: string;
+  existingUser?: boolean;
+}): string {
+  if (input.existingUser) {
+    return `${input.firstName} invited you to ${input.groupName} on PitchIn. Open the app to accept.`;
+  }
   return `${input.firstName} invited you to ${input.groupName} on PitchIn. Download the app: ${input.url}`;
 }
 

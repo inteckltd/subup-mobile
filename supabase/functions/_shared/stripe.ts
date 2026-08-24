@@ -63,7 +63,7 @@ export async function refundPaymentIntent(stripe: Stripe, paymentIntentId: strin
   });
 }
 
-/** Keep pitch money on Connect until we explicitly payout after lock. */
+/** Keep pitch money on Connect until we explicitly payout after kickoff. */
 export async function ensureManualPayouts(stripe: Stripe, accountId: string) {
   await stripe.accounts.update(accountId, {
     settings: {
@@ -85,8 +85,8 @@ function gbpAvailable(balance: Stripe.Balance): number {
 }
 
 /**
- * Pays out only this game's pitch total from the treasurer Connect account.
- * Retries on later crons if the balance is still pending.
+ * Pays out only this game's pitch total from the treasurer Connect account
+ * after kickoff. Retries on later crons if the balance is still pending.
  */
 export async function payoutDueTreasurerGames(service: SupabaseClient, stripe: Stripe): Promise<number> {
   const { data, error } = await service.rpc('list_games_due_treasurer_payout');

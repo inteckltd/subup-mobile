@@ -3,7 +3,8 @@
 // Best-effort delivery for a group invite the client just created via
 // `invite_group_member`. Existing users get Expo push (inbox row already
 // inserted by the RPC). Unknown mobiles get one Twilio SMS with a download
-// link. A failure here never affects whether the invite exists.
+// link unless the caller sets skipSms (WhatsApp already delivered the invite).
+// A failure here never affects whether the invite exists.
 //
 // Security (same model as notify-game-created):
 //   1. Verify the caller's JWT with an anon-key client.
@@ -72,9 +73,11 @@ Deno.serve(async (req) => {
   }
 
   let inviteId: string | undefined;
+  let skipSms = false;
   try {
     const body = await req.json();
     inviteId = body?.inviteId;
+    skipSms = body?.skipSms === true;
   } catch {
     return jsonResponse({ ok: false, error: 'Invalid request body' }, 400);
   }
@@ -133,6 +136,9 @@ Deno.serve(async (req) => {
   }
 
   if (inviteRow && !inviteRow.invited_user_id) {
+    if (skipSms) {
+      return jsonResponse({ ok: true, notified: 0, pushed: 0, sms: false, skipped: true });
+    }
     if (inviteRow.sms_sent_at) {
       return jsonResponse({ ok: true, notified: 0, pushed: 0, sms: false, alreadySent: true });
     }

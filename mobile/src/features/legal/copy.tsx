@@ -24,10 +24,12 @@ export function TermsCopy() {
       <Para>
         Paid games are joined with Apple Pay, Google Pay, or card via Stripe. You pay the pitch cost the organiser set
         plus a PitchIn service fee shown before you confirm. The organiser (the group treasurer) receives the pitch
-        amount through Stripe Connect; PitchIn retains the service fee. There is no cash or waived entry. If a game is
-        cancelled or you leave before the lock window, card payments are refunded in full (pitch plus PitchIn fee).
-        After the lock window, payments are not refunded. The treasurer is paid the pitch total after lock; that
-        usually reaches their bank in around two business days. PitchIn retains the service fee when you pay.
+        amount through Stripe Connect; PitchIn retains the service fee. There is no cash or waived entry. If you leave
+        before the lock window, card payments are refunded in full (pitch plus PitchIn fee). After the lock window you
+        cannot leave a confirmed spot. If a game is cancelled before kickoff, paid players are refunded in full. After
+        kickoff the game cannot be cancelled and payments are not refunded. The treasurer is paid the pitch total after
+        the game starts; that usually reaches their bank in around two business days. PitchIn retains the service fee
+        when you pay.
       </Para>
       <Para>
         We may suspend or delete accounts that abuse the service (for example spam invites, impersonation, or attempts

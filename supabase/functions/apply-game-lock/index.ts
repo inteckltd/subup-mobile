@@ -3,6 +3,8 @@
 // Scheduled sweep (pg_cron + pg_net, every 5 minutes) that:
 //   * cancels games still below min at lock time
 //   * otherwise assigns MMR-balanced home/away teams
+//   * refunds auto-cancelled paid games
+//   * pays out the treasurer after kickoff (retries if Connect balance is pending)
 // then pushes the notifications apply_game_lock_window already inserted.
 // Gated by x-cron-secret / CRON_SECRET, same model as close-motm-votes.
 
@@ -116,9 +118,6 @@ Deno.serve(async (req) => {
 
   const lockRows = ((processed ?? []) as { game_id: string; action: string }[]);
   const gameIds = lockRows.map((row) => row.game_id);
-  if (gameIds.length === 0) {
-    return jsonResponse({ ok: true, gamesProcessed: 0, notified: 0, pushed: 0 });
-  }
 
   if (Deno.env.get('STRIPE_SECRET_KEY')) {
     const stripe = getStripe();
@@ -137,6 +136,10 @@ Deno.serve(async (req) => {
       console.error('[apply-game-lock] treasurer payouts failed', payoutError);
       await captureEdgeError('apply-game-lock', payoutError);
     }
+  }
+
+  if (gameIds.length === 0) {
+    return jsonResponse({ ok: true, gamesProcessed: 0, notified: 0, pushed: 0 });
   }
 
   const { data: notifications, error: notificationsError } = await serviceClient
