@@ -58,6 +58,21 @@ function functionErrorMessage(data: unknown, fallback: string): string {
   return fallback;
 }
 
+async function invokeFunctionError(data: unknown, error: unknown, fallback: string): Promise<string> {
+  const fromBody = functionErrorMessage(data, '');
+  if (fromBody) return fromBody;
+  const context = error && typeof error === 'object' && 'context' in error ? (error as { context?: Response }).context : undefined;
+  if (context && typeof context.json === 'function') {
+    try {
+      const body = (await context.json()) as { error?: unknown };
+      if (typeof body?.error === 'string' && body.error.trim()) return body.error;
+    } catch {
+      // Response body already consumed or not JSON.
+    }
+  }
+  return friendlyError(error ?? data, fallback);
+}
+
 export type ConnectStatus = {
   chargesEnabled?: boolean;
   payoutsEnabled?: boolean;
@@ -163,7 +178,7 @@ export async function invalidatePayoutsQueries(queryClient: QueryClient) {
 export async function startConnectOnboarding(): Promise<{ url?: string; error?: string }> {
   const { data, error } = await supabase.functions.invoke('create-connect-account-link', { body: {} });
   if (error || !data?.url) {
-    return { error: functionErrorMessage(data, friendlyError(error ?? data, "Couldn't start payouts setup.")) };
+    return { error: await invokeFunctionError(data, error, "Couldn't start payouts setup.") };
   }
   return { url: data.url as string };
 }

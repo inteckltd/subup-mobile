@@ -1,20 +1,26 @@
 import { Image } from 'expo-image';
 
-const logo = require('../../assets/images/subup-logo.png');
+const logos = {
+  cyan: require('../../assets/images/subup-logo.png'),
+  white: require('../../assets/images/subup-logo-white.png'),
+} as const;
 
-/** Intrinsic size of `subup-logo.png` after the black field was knocked out. */
-const LOGO_ASPECT = 991 / 212;
+const ASPECT = {
+  cyan: 991 / 212,
+  white: 1500 / 438,
+} as const;
 
 type BrandLogoProps = {
   height?: number;
+  /** Cyan lockup for navy headers; white lockup for photo heroes. */
+  variant?: keyof typeof logos;
 };
 
-/** Cyan lockup for navy/photo headers. */
-export function BrandLogo({ height = 28 }: BrandLogoProps) {
+export function BrandLogo({ height = 28, variant = 'cyan' }: BrandLogoProps) {
   return (
     <Image
-      source={logo}
-      style={{ height, width: height * LOGO_ASPECT }}
+      source={logos[variant]}
+      style={{ height, width: height * ASPECT[variant] }}
       contentFit="contain"
       accessibilityLabel="SubUp"
     />

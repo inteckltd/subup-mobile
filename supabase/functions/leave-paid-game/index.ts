@@ -2,7 +2,14 @@
 
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
-import { createAnonClient, getStripe, jsonResponse, refundPaymentIntent, requireUserId } from '../_shared/stripe.ts';
+import {
+  createAnonClient,
+  getStripe,
+  isIdempotentRefundError,
+  jsonResponse,
+  refundPaymentIntent,
+  requireUserId,
+} from '../_shared/stripe.ts';
 
 Deno.serve(async (req) => {
   const auth = await requireUserId(req);
@@ -49,11 +56,19 @@ Deno.serve(async (req) => {
 
     const stripe = getStripe();
     if (player.payment_status === 'paid' && player.stripe_payment_intent_id) {
+      const { data: payment, error: paymentError } = await service
+        .from('game_payments')
+        .select('pitch_cents')
+        .eq('stripe_payment_intent_id', player.stripe_payment_intent_id)
+        .maybeSingle();
+      if (paymentError) throw paymentError;
+      if (payment?.pitch_cents == null) {
+        return jsonResponse({ ok: false, error: "Couldn't refund this payment. Please try again." }, 400);
+      }
       try {
-        await refundPaymentIntent(stripe, player.stripe_payment_intent_id);
+        await refundPaymentIntent(stripe, player.stripe_payment_intent_id, payment.pitch_cents);
       } catch (refundError) {
-        const message = refundError instanceof Error ? refundError.message : String(refundError);
-        if (!/already been refunded|charge_already_refunded/i.test(message)) {
+        if (!isIdempotentRefundError(refundError)) {
           await captureEdgeError('leave-paid-game', refundError);
           return jsonResponse({ ok: false, error: "Couldn't refund this payment. Please try again." }, 400);
         }

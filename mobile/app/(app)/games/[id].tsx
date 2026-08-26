@@ -52,7 +52,7 @@ function confirmLeaveGame(input: { isWaitlisted: boolean; paid: boolean; onLeave
   let message: string | undefined;
   if (!input.isWaitlisted) {
     message = input.paid
-      ? 'Are you sure you want to leave? A refund will be processed for the pitch cost and SubUp fee.'
+      ? 'Are you sure you want to leave? The pitch cost will be refunded. The SubUp fee is not refunded.'
       : 'Are you sure you want to leave this game?';
   }
   Alert.alert(title, message, [
@@ -179,7 +179,7 @@ export default function GameDetailsScreen() {
                     onPress: () => {
                       Alert.alert(
                         'Cancel this game?',
-                        'Everyone who joined will be notified. Paid players are refunded. You can’t undo this.',
+                        'Everyone who joined will be notified. Paid players get the pitch back; the SubUp fee is not refunded. You can’t undo this.',
                         [
                           { text: 'Keep game', style: 'cancel' },
                           {

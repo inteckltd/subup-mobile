@@ -25,14 +25,15 @@ export function TermsCopy() {
       </Para>
       <Para>
         Paid games are joined with Apple Pay, Google Pay, or card via Stripe. You pay the pitch cost the organiser set
-        plus a SubUp service fee shown before you confirm (currently 10% of the pitch cost, minimum 30p; £0 for free
+        plus a SubUp service fee shown before you confirm (currently 10% of the pitch cost, minimum 50p; £0 for free
         games). The organiser (the group treasurer) receives the pitch amount through Stripe Connect; SubUp retains the
         service fee. There is no cash or waived entry. Each group sets a lock window of 24, 48, or 72 hours before
-        kickoff. If you leave before that window, card payments are refunded in full (pitch plus SubUp fee). After the
+        kickoff. If you leave before that window, the pitch is refunded; the SubUp service fee is not. After the
         lock window you cannot leave a confirmed spot. If a game is cancelled before kickoff — including automatic
-        cancellation when too few paid players have joined — paid players are refunded in full. After kickoff the game
-        cannot be cancelled and payments are not refunded. The treasurer is paid the pitch total after the game starts;
-        that usually reaches their bank in around two business days. SubUp retains the service fee when you pay.
+        cancellation when too few paid players have joined — the pitch is refunded and the SubUp service fee is not.
+        After kickoff the game cannot be cancelled and payments are not refunded. The treasurer is paid the pitch total
+        after the game starts; that usually reaches their bank in around two business days. SubUp retains the service
+        fee when you pay.
       </Para>
       <Para>
         We may suspend or delete accounts that abuse the service (for example spam invites, impersonation, or attempts
@@ -46,9 +47,6 @@ export function TermsCopy() {
         outages, or indirect loss.
       </Para>
       <Para>Questions: info@inteckltd.co.uk.</Para>
-      <Text className="font-sans text-base text-muted">
-        This draft will be reviewed by a solicitor before public App Store / Play Store launch.
-      </Text>
     </>
   );
 }
@@ -84,9 +82,6 @@ export function PrivacyCopy() {
         needed for security and legal claims. Some processors may handle data outside the UK with appropriate
         safeguards.
       </Para>
-      <Text className="font-sans text-base text-muted">
-        This draft will be reviewed by a solicitor before public launch.
-      </Text>
     </>
   );
 }

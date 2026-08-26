@@ -30,7 +30,7 @@ export function AuthHeroHeader({ showBack, heroImage }: AuthHeroHeaderProps) {
         className="absolute inset-0"
       />
       <View className="flex-1 items-center justify-center pb-20 pt-24">
-        <BrandLogo height={44} />
+        <BrandLogo height={44} variant="white" />
       </View>
       {showBack ? (
         <Pressable
