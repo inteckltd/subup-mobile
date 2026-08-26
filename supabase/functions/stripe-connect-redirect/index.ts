@@ -1,5 +1,5 @@
 // Stripe Account Links only accept https return/refresh URLs. This
-// public redirect sends the in-app browser back to pitchin:// so
+// public redirect sends the in-app browser back to subup:// so
 // WebBrowser.openAuthSessionAsync can close.
 
 const ALLOWED = new Set(['return', 'refresh']);
@@ -11,7 +11,7 @@ Deno.serve((req) => {
   return new Response(null, {
     status: 302,
     headers: {
-      Location: `pitchin://stripe-connect/${target}`,
+      Location: `subup://stripe-connect/${target}`,
     },
   });
 });

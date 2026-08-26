@@ -1,12 +1,12 @@
-# PitchIn brand brief
+# SubUp brand brief
 
 For marketing, a designer, or an agency. This is what the **live app** uses today. Please match these values so the logo, store listings, and ads sit on the same product.
 
-**Working name:** PitchIn  
-**Spoken:** “Pitch In”  
-**Written:** PitchIn (one word, capital P and I). Not Pitch-In, Pitchin, or PITCHIN in body copy.  
+**Working name:** SubUp  
+**Spoken:** “Sub Up”  
+**Written:** SubUp (one word, capital S and U). Not Sub-Up, Subup, or SUBUP in body copy.  
 **One-liner:** Organise the kickabout, collect the cash, track the games, climb the ratings.  
-**Company / legal:** Inteck (`com.inteck.pitchin`)  
+**Company / legal:** Inteck (`com.inteck.subup`)  
 **Market:** United Kingdom first. Copy uses UK English: mobile, mates, pitch, venue.
 
 ---
@@ -30,7 +30,7 @@ Private sports groups for friends (football, rugby, padel, basketball, etc.). No
 | Short buttons: Join, Leave, Confirm | Clever puns on every screen |
 | Confident and calm | Hype, all-caps slogans, emoji walls |
 
-App wordmark in the header is **PITCHIN** in extra-bold uppercase. Marketing headlines can be sentence case; the in-app mark stays tight and uppercase.
+App wordmark in the header is **SUBUP** in extra-bold uppercase. Marketing headlines can be sentence case; the in-app mark stays tight and uppercase.
 
 ---
 
@@ -40,23 +40,23 @@ From `mobile/src/theme/tokens.ts`. Do not invent a second palette.
 
 | Token | Hex | Use |
 |-------|-----|-----|
-| **Primary** | `#0B6E4F` | Deep green. Headers, primary buttons, brand field, Android adaptive icon background |
-| **Accent** | `#B8F236` | Lime. Logo tile, highlights, avatar ring. Use sparingly |
-| **Ink** | `#121212` | Body text |
-| **Muted** | `#60736C` | Subtitles, hints |
-| **Background** | `#F4F6F5` | App canvas, splash background |
-| **White** | `#FFFFFF` | Cards, wordmark on green |
+| **Primary** | `#032488` | Navy. Headers, primary buttons, brand field, Android adaptive icon background |
+| **Accent** | `#05deed` | Cyan. Logo, highlights, FAB, avatar ring. Use sparingly |
+| **Ink** | `#010101` | Body text |
+| **Muted** | `#5C6B8A` | Subtitles, hints |
+| **Background** | `#FEFEFD` | App canvas, splash background |
+| **White** | `#FFFFFF` | Cards |
 | **Border** | `#F3F4F6` | Hairline dividers |
 | **Danger** | `#DC2626` | Errors, leave, delete only |
 | **Gold** | `#F2C14E` | MMR chip only. Not for logos |
 
 **Pairs that already work in the app**
 
-- Green field + lime mark + white wordmark (home header)
-- Soft grey canvas + white cards + green buttons
-- Lime square, slightly rotated (−3°), people icon in primary green — current *placeholder* mark
+- Navy field + cyan lockup (home header)
+- Off-white canvas + white cards + navy buttons
+- Cyan FAB on navy/ink
 
-**Contrast:** lime `#B8F236` on white is weak. Put lime on primary green, or primary green on lime. Never lime text on the grey background.
+**Contrast:** cyan `#05deed` on white is weak. Put cyan on navy (`#032488`), or navy on cyan. Never cyan text on the off-white canvas.
 
 ---
 
@@ -71,7 +71,7 @@ From `mobile/src/theme/tokens.ts`. Do not invent a second palette.
 
 ## Shape and layout
 
-- Cards: large radius (~40pt) — the green header is a rounded-bottom “hero”
+- Cards: large radius (~40pt) — the navy header is a rounded-bottom “hero”
 - Controls / inputs: 16pt radius
 - Pills / chips: 12pt
 - Screen padding: 24pt
@@ -82,22 +82,21 @@ From `mobile/src/theme/tokens.ts`. Do not invent a second palette.
 
 ## Logo — what we need from you
 
-The current mark is a **placeholder**: a lime rounded square, tilted, Ionicons “people”, plus the PitchIn wordmark. Replace this before store launch.
+The header lockup is in `mobile/assets/images/subup-logo.png` (cyan on transparent). Store icon is still a placeholder.
 
-**Please deliver**
+**Still needed for launch**
 
 1. **App icon** — 1024×1024, no rounded-rect baked in (iOS applies the mask). Readable at 60pt and 29pt.
-2. **Android adaptive icon** — foreground on transparent, safe zone in the centre ~66%. Background can be flat `#0B6E4F`.
-3. **Wordmark** — PitchIn in Manrope ExtraBold or a custom logotype that still feels like Manrope. Horizontal lockup + stacked lockup.
-4. **Symbol only** — works in a notification (24pt) and as a favicon. Prefer a simple pitch / “in” / people idea. Not a detailed football.
-5. **On green** and **on lime** and **on `#F4F6F5`** versions (full colour + single-colour).
-6. **Splash** — symbol centred on `#F4F6F5`, or symbol on `#0B6E4F` if you prefer a green launch. Current splash uses the light canvas.
-7. **Store** — 1024×500 Play feature graphic; iPhone 6.7" / 6.5" screenshot frames if you do those too.
+2. **Android adaptive icon** — foreground on transparent, safe zone in the centre ~66%. Background can be flat `#032488`.
+3. **Symbol only** — works in a notification (24pt) and as a favicon.
+4. **On navy** and **on cyan** and **on `#FEFEFD`** versions (full colour + single-colour).
+5. **Splash** — symbol centred on `#FEFEFD`, or symbol on `#032488` if you prefer a navy launch.
+6. **Store** — 1024×500 Play feature graphic; iPhone 6.7" / 6.5" screenshot frames if you do those too.
 
 **Direction (not a brief to copy blindly)**
 
 - Private squad, not a stadium brand
-- Lime is the spark; green is the pitch
+- Cyan is the spark; navy is the field
 - Avoid clip-art balls, trophy piles, or WhatsApp-green clones (`#25D366`)
 - Avoid the Expo construction-grid mark still in `mobile/assets/icon.png`
 
@@ -115,15 +114,16 @@ Auth screens use warm, real-sport stills (`mobile/assets/images/auth-hero.jpg`).
 
 | File | Notes |
 |------|--------|
+| `mobile/assets/images/subup-logo.png` | Header / auth lockup (cyan, transparent) |
 | `mobile/assets/icon.png` | Placeholder — replace |
 | `mobile/assets/splash-icon.png` | Placeholder splash |
-| `mobile/assets/android-icon-*.png` | Adaptive layers; background now `#0B6E4F` |
+| `mobile/assets/android-icon-*.png` | Adaptive layers; background now `#032488` |
 | `mobile/src/theme/tokens.ts` | Colours the code actually uses |
 
 ---
 
 ## Legal / store names
 
-- **Display name:** PitchIn  
-- **iOS / Android id:** `com.inteck.pitchin`  
-- Do not invent a second consumer name without a product decision
+- **Display name:** SubUp  
+- **iOS / Android id:** `com.inteck.subup`  
+- Expo project slug remains `pitchin` (internal; not shown on the stores)

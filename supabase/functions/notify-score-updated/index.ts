@@ -1,4 +1,4 @@
-// PitchIn — notify-score-updated Edge Function.
+// SubUp — notify-score-updated Edge Function.
 //
 // Best-effort push fan-out for a game whose score the client just submitted
 // via the `submit_game_score` RPC. In-app `notifications` rows are already

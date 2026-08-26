@@ -1,4 +1,4 @@
-// PitchIn — notify-waitlist-promoted Edge Function.
+// SubUp — notify-waitlist-promoted Edge Function.
 //
 // Best-effort push for a player just promoted off the waitlist by
 // `leave_game`. In-app `notifications` rows are already inserted

@@ -80,7 +80,7 @@ Same Account SID + Auth Token go in **two** places (never commit them):
 1. Dashboard → Authentication → Providers → Phone → Twilio
 2. Edge Function secrets (invite SMS + phone-change OTP)
 
-Trial: enable UK geo, verify destination numbers, expect the trial prefix. Production: paid sender, no trial prefix. Alphanumeric `PitchIn` needs a paid account.
+Trial: enable UK geo, verify destination numbers, expect the trial prefix. Production: paid sender, no trial prefix. Alphanumeric `SubUp` needs a paid account.
 
 `INVITE_APP_URL` is the download link in invite texts (TestFlight, Play internal track, or a landing page). Set the same URL as `EXPO_PUBLIC_INVITE_APP_URL` in the mobile app / EAS so WhatsApp and Messages share the same link.
 

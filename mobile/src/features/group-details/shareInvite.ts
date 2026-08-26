@@ -14,9 +14,9 @@ export function buildInviteShareMessage(input: {
   existingUser?: boolean;
 }): string {
   if (input.existingUser) {
-    return `${input.firstName} invited you to ${input.groupName} on PitchIn. Open the app to accept.`;
+    return `${input.firstName} invited you to ${input.groupName} on SubUp. Open the app to accept.`;
   }
-  return `${input.firstName} invited you to ${input.groupName} on PitchIn. Download the app: ${input.url}`;
+  return `${input.firstName} invited you to ${input.groupName} on SubUp. Download the app: ${input.url}`;
 }
 
 /** wa.me / WhatsApp send URLs want digits only (447…), no plus. */

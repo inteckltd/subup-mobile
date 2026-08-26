@@ -1,4 +1,4 @@
-// PitchIn — notify-game-lifecycle Edge Function.
+// SubUp — notify-game-lifecycle Edge Function.
 //
 // Best-effort push fan-out after update_game / cancel_game. In-app
 // notifications are already inserted in those RPCs. Same JWT + membership

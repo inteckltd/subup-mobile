@@ -52,7 +52,7 @@ function confirmLeaveGame(input: { isWaitlisted: boolean; paid: boolean; onLeave
   let message: string | undefined;
   if (!input.isWaitlisted) {
     message = input.paid
-      ? 'Are you sure you want to leave? A refund will be processed for the pitch cost and PitchIn fee.'
+      ? 'Are you sure you want to leave? A refund will be processed for the pitch cost and SubUp fee.'
       : 'Are you sure you want to leave this game?';
   }
   Alert.alert(title, message, [
@@ -279,7 +279,7 @@ export default function GameDetailsScreen() {
 
           {game.priceCents > 0 ? (
             <Text className="font-sans text-xs text-muted">
-              {formatGbp(game.priceCents)} pitch + {formatGbp(game.feeCents ?? 0)} PitchIn fee
+              {formatGbp(game.priceCents)} pitch + {formatGbp(game.feeCents ?? 0)} SubUp fee
             </Text>
           ) : null}
 

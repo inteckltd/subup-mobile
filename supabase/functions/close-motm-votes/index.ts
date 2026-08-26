@@ -1,4 +1,4 @@
-// PitchIn — close-motm-votes Edge Function.
+// SubUp — close-motm-votes Edge Function.
 //
 // Scheduled sweep (pg_cron + pg_net, every 5 minutes) that finalizes MOTM
 // voting 24h after a game's score was entered, then pushes the already-

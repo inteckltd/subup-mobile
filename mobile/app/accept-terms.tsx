@@ -36,7 +36,7 @@ export default function AcceptTermsScreen() {
           <Text className="font-sans-extrabold text-2xl text-ink">Updated terms</Text>
           <Text className="font-sans text-base text-muted">
             We&apos;ve updated our Terms of Service (v{TERMS_VERSION}) and Privacy Policy (v{PRIVACY_VERSION}). Please
-            review and accept them to keep using PitchIn.
+            review and accept them to keep using SubUp.
           </Text>
         </View>
 

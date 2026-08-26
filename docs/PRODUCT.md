@@ -1,15 +1,15 @@
-# PitchIn
+# SubUp
 
 > Organise recreational sports with your mates — without WhatsApp chaos.
 
 ## What it is
 
-PitchIn is a mobile app (iOS & Android) for friend groups who play sports together
+SubUp is a mobile app (iOS & Android) for friend groups who play sports together
 (football, rugby, padel, basketball, etc.). It replaces messy group chats with
 structured **groups**, **games**, **payments**, **scores**, and a lightweight
 **MMR rating** (inspired by apps like Playtomic), plus **Man of the Match**.
 
-**Working name:** PitchIn  
+**Working name:** SubUp  
 **Platforms:** iOS and Android via **Expo (React Native)**  
 **Backend:** **Supabase** (Auth, Postgres, RLS, Storage, Edge Functions)  
 **UI:** **NativeWind** + Expo Router  
@@ -73,7 +73,7 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 **Built.** Create/edit/cancel game, join/leave/waitlist, lock window, auto-cancel if min not met, MMR-balanced team pick.
 
 ### Phase 4 — Payments
-**Built.** Stripe Connect Express (one treasurer per group), pay-to-join with Apple Pay / Google Pay / card, PitchIn fee on top of pitch cost, refunds on leave (before lock) and cancel / auto-cancel. No cash or waive. See `docs/TEMP_CATEGORY_1_LAUNCH.md` for remaining Stripe ops (webhook URL, live keys).
+**Built.** Stripe Connect Express (one treasurer per group), pay-to-join with Apple Pay / Google Pay / card, SubUp fee on top of pitch cost, refunds on leave (before lock) and cancel / auto-cancel. No cash or waive. See `docs/TEMP_CATEGORY_1_LAUNCH.md` for remaining Stripe ops (webhook URL, live keys).
 
 ### Phase 5 — Results & MMR
 **Built.** Admin score entry, MOTM voting, Elo-style MMR + MOTM bump, history and profile stats.
@@ -99,7 +99,7 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 
 - Clean, sporty, trustworthy (Playtomic-like clarity)
 - Not enterprise/cluttered
-- Brand colours (guidance): deep green `#0B6E4F`, lime accent `#B8F236`, charcoal `#121212`, soft bg `#F4F6F5`
+- Brand colours (guidance): navy `#032488`, cyan accent `#05deed`, ink `#010101`, canvas `#FEFEFD`
 - NativeWind, light mode first
 - UK copy (e.g. "mobile", "mates", pitch/venue language)
 
@@ -129,4 +129,4 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 
 ## Pitch (one liner)
 
-**PitchIn** — organise the kickabout, collect the cash, track the games, climb the ratings.
+**SubUp** — organise the kickabout, collect the cash, track the games, climb the ratings.

@@ -29,7 +29,7 @@ function MmrDeltaBadge({ delta }: { delta: number }) {
 function paymentBadge(status: GamePlayerModel['paymentStatus']): { label: string; bg: string; color: string } {
   switch (status) {
     case 'paid':
-      return { label: 'PAID', bg: 'rgba(11,110,79,0.1)', color: '#0B6E4F' };
+      return { label: 'PAID', bg: 'rgba(3,36,136,0.1)', color: colors.primary };
     case 'pending':
       return { label: 'PAYING', bg: '#FEF3C7', color: '#B45309' };
     case 'refunded':

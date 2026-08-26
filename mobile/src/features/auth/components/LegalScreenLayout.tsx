@@ -3,6 +3,8 @@ import { router } from 'expo-router';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { colors } from '../../../theme/tokens';
+
 type LegalScreenLayoutProps = {
   title: string;
   version: string;
@@ -23,7 +25,7 @@ export function LegalScreenLayout({ title, version, children }: LegalScreenLayou
             accessibilityRole="button"
             accessibilityLabel="Go back"
           >
-            <Ionicons name="arrow-back" size={18} color="#121212" />
+            <Ionicons name="arrow-back" size={18} color={colors.ink} />
           </Pressable>
         ) : null}
         <Text className="font-sans-extrabold text-xl text-ink">{title}</Text>

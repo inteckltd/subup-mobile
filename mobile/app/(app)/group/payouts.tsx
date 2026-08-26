@@ -92,7 +92,7 @@ export default function GroupPayoutsScreen() {
       setError(result.error ?? "Couldn't start payouts setup.");
       return;
     }
-    await WebBrowser.openAuthSessionAsync(result.url, 'pitchin://stripe-connect/return');
+    await WebBrowser.openAuthSessionAsync(result.url, 'subup://stripe-connect/return');
     const status = await refreshFromStripe({ poll: true });
     if (!status.error && !connectAccountReady(status)) {
       setError(connectStatusMessage(status));
@@ -160,7 +160,7 @@ export default function GroupPayoutsScreen() {
           <Text className="mt-2 font-sans-bold text-base text-ink">{payouts.treasurerName}</Text>
           <Text className="mt-1 font-sans text-sm text-muted">
             Pitch money stays in Stripe until a game locks and players can no longer leave. After that, this admin’s
-            pitch total is paid to their UK bank — usually around 2 business days. PitchIn’s fee is collected when a
+            pitch total is paid to their UK bank — usually around 2 business days. SubUp’s fee is collected when a
             player pays.
           </Text>
           {admins.length > 1 ? (
@@ -180,7 +180,7 @@ export default function GroupPayoutsScreen() {
               ? payouts.payoutsEnabled
                 ? 'This group can create paid games. Players pay in the app with Apple Pay, Google Pay, or card.'
                 : 'Payments can be taken. Stripe is still verifying the bank account for payouts.'
-              : 'The treasurer completes a short Stripe form (name, address, photo ID, sort code and account number). Stripe hosts this — PitchIn never sees those details.'}
+              : 'The treasurer completes a short Stripe form (name, address, photo ID, sort code and account number). Stripe hosts this — SubUp never sees those details.'}
           </Text>
         </View>
 

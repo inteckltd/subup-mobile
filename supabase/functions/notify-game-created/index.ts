@@ -1,4 +1,4 @@
-// PitchIn — notify-game-created Edge Function.
+// SubUp — notify-game-created Edge Function.
 //
 // Best-effort push fan-out for a game the client just created via the
 // `create_game` RPC. In-app `notifications` rows are already inserted

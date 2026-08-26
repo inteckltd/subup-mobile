@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "PitchIn",
+    "name": "SubUp",
     "slug": "pitchin",
-    "scheme": "pitchin",
+    "scheme": "subup",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "backgroundColor": "#F4F6F5",
+    "backgroundColor": "#FEFEFD",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.inteck.pitchin",
+      "bundleIdentifier": "com.inteck.subup",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "LSApplicationQueriesSchemes": ["whatsapp"]
@@ -18,9 +18,9 @@
     },
     "android": {
       "softwareKeyboardLayoutMode": "pan",
-      "package": "com.inteck.pitchin",
+      "package": "com.inteck.subup",
       "adaptiveIcon": {
-        "backgroundColor": "#0B6E4F",
+        "backgroundColor": "#032488",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -41,14 +41,14 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#F4F6F5"
+          "backgroundColor": "#FEFEFD"
         }
       ],
       "expo-image",
       [
         "expo-image-picker",
         {
-          "photosPermission": "PitchIn uses your photos for your profile picture and group cover images.",
+          "photosPermission": "SubUp uses your photos for your profile picture and group cover images.",
           "microphonePermission": false
         }
       ],
@@ -57,7 +57,7 @@
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
-          "color": "#0B6E4F"
+          "color": "#032488"
         }
       ],
       [

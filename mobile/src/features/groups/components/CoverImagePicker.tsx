@@ -15,7 +15,7 @@ export function CoverImagePicker({ uri, onChange }: CoverImagePickerProps) {
   const pickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Photo access needed', 'Allow PitchIn to access your photos to set a cover image.');
+      Alert.alert('Photo access needed', 'Allow SubUp to access your photos to set a cover image.');
       return;
     }
 

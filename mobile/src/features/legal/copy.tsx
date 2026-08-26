@@ -8,8 +8,10 @@ export function TermsCopy() {
   return (
     <>
       <Para>
-        These Terms of Service (“Terms”) apply when you use PitchIn, the mobile app operated by Inteck for organising
-        private recreational sports groups in the United Kingdom.
+        These Terms of Service (“Terms”) apply when you use SubUp, the mobile app operated by Inteck Ltd for organising
+        private recreational sports groups in the United Kingdom. Inteck Ltd is registered in England and Wales
+        (company number 12246244). Registered office: Unit B, Focal Point, Second Avenue, Trafford Park, Manchester,
+        M17 1FG.
       </Para>
       <Para>
         You must be able to enter a contract under UK law. There is no age gate in this version of the app. You are
@@ -17,19 +19,20 @@ export function TermsCopy() {
         your login details secure.
       </Para>
       <Para>
-        PitchIn is for organising private groups, scheduling games, joining or leaving a lobby, recording scores, voting
-        for Man of the Match, and viewing history and ratings. Groups are invite-only. You agree to treat other players
-        with respect and not to misuse invites, notifications, or SMS.
+        SubUp is for organising private groups, scheduling games, joining or leaving a lobby, recording scores, voting
+        for Man of the Match, and viewing history and ratings. Groups are invite-only. We do not run the sport or hire
+        the pitch. You agree to treat other players with respect and not to misuse invites, notifications, or SMS.
       </Para>
       <Para>
         Paid games are joined with Apple Pay, Google Pay, or card via Stripe. You pay the pitch cost the organiser set
-        plus a PitchIn service fee shown before you confirm. The organiser (the group treasurer) receives the pitch
-        amount through Stripe Connect; PitchIn retains the service fee. There is no cash or waived entry. If you leave
-        before the lock window, card payments are refunded in full (pitch plus PitchIn fee). After the lock window you
-        cannot leave a confirmed spot. If a game is cancelled before kickoff, paid players are refunded in full. After
-        kickoff the game cannot be cancelled and payments are not refunded. The treasurer is paid the pitch total after
-        the game starts; that usually reaches their bank in around two business days. PitchIn retains the service fee
-        when you pay.
+        plus a SubUp service fee shown before you confirm (currently 10% of the pitch cost, minimum 30p; £0 for free
+        games). The organiser (the group treasurer) receives the pitch amount through Stripe Connect; SubUp retains the
+        service fee. There is no cash or waived entry. Each group sets a lock window of 24, 48, or 72 hours before
+        kickoff. If you leave before that window, card payments are refunded in full (pitch plus SubUp fee). After the
+        lock window you cannot leave a confirmed spot. If a game is cancelled before kickoff — including automatic
+        cancellation when too few paid players have joined — paid players are refunded in full. After kickoff the game
+        cannot be cancelled and payments are not refunded. The treasurer is paid the pitch total after the game starts;
+        that usually reaches their bank in around two business days. SubUp retains the service fee when you pay.
       </Para>
       <Para>
         We may suspend or delete accounts that abuse the service (for example spam invites, impersonation, or attempts
@@ -37,13 +40,14 @@ export function TermsCopy() {
         the version stored in the app you will be asked to accept again before continuing.
       </Para>
       <Para>
-        PitchIn is provided as-is. We do not guarantee that every game will go ahead, that scores or ratings are
-        complete, or that the service will be uninterrupted. To the extent permitted by UK law we are not liable for
-        lost games, payment processor outages, or indirect loss.
+        SubUp is provided as-is. We do not guarantee that every game will go ahead, that scores or ratings are
+        complete, or that the service will be uninterrupted. Nothing in these Terms limits your statutory rights as a
+        consumer under UK law. To the extent permitted by UK law we are not liable for lost games, payment processor
+        outages, or indirect loss.
       </Para>
+      <Para>Questions: info@inteckltd.co.uk.</Para>
       <Text className="font-sans text-base text-muted">
-        This draft will be reviewed by a solicitor before public App Store / Play Store launch. Hosted web copies of
-        these Terms will be published at that point.
+        This draft will be reviewed by a solicitor before public App Store / Play Store launch.
       </Text>
     </>
   );
@@ -53,14 +57,15 @@ export function PrivacyCopy() {
   return (
     <>
       <Para>
-        PitchIn (“we”) is the controller of personal data you provide in the app. Contact: the support email listed on
-        our store listings (or in Settings once published).
+        Inteck Ltd (“SubUp”, “we”) is the controller of personal data you provide in the app. Company number 12246244.
+        Contact: info@inteckltd.co.uk.
       </Para>
       <Para>
         We process: your name, UK mobile number (your login), optional email, optional profile photo, group and game
-        activity, scores, votes, ratings, push tokens, and device diagnostics if you enable error reporting. Legal
-        bases: contract (to run your account and groups) and legitimate interests (security, abuse prevention, product
-        reliability).
+        activity, scores, votes, ratings, push tokens, payment records (status, amounts, Stripe identifiers), and
+        device diagnostics if you enable error reporting. Legal bases: contract (to run your account, groups, and
+        payments), legitimate interests (security, abuse prevention, product reliability), and legal obligation where we
+        must keep records.
       </Para>
       <Para>
         Data is stored with Supabase (Postgres, Auth, Storage) with a UK/EU region target. Password-reset and group
@@ -76,11 +81,11 @@ export function PrivacyCopy() {
       <Para>
         You have UK GDPR rights: access, rectification, erasure, restriction, objection, and portability, and the right
         to complain to the ICO. We keep account data while your account exists and for a short period afterwards as
-        needed for security and legal claims.
+        needed for security and legal claims. Some processors may handle data outside the UK with appropriate
+        safeguards.
       </Para>
       <Text className="font-sans text-base text-muted">
-        This draft will be reviewed by a solicitor before public launch. A hosted Privacy Policy URL is required for
-        App Store and Play Console.
+        This draft will be reviewed by a solicitor before public launch.
       </Text>
     </>
   );

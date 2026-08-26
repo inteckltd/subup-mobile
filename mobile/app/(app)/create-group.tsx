@@ -73,7 +73,7 @@ export default function CreateGroupScreen() {
       setPayoutsError(result.error ?? "Couldn't start payouts setup.");
       return;
     }
-    await WebBrowser.openAuthSessionAsync(result.url, 'pitchin://stripe-connect/return');
+    await WebBrowser.openAuthSessionAsync(result.url, 'subup://stripe-connect/return');
     const status = await syncConnectStatusUntilReady();
     setPayoutsStatus(status);
     setPayoutsReady(connectAccountReady(status));

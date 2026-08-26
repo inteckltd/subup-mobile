@@ -157,7 +157,7 @@ export default function InviteMemberScreen() {
             bottomOffset={88}
           >
             <Text className="font-sans text-sm text-muted">
-              Invite someone by their UK mobile number. If they don&apos;t have PitchIn yet, we&apos;ll text them a download link.
+              Invite someone by their UK mobile number. If they don&apos;t have SubUp yet, we&apos;ll text them a download link.
             </Text>
             <Controller
               control={control}

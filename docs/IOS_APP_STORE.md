@@ -1,6 +1,6 @@
 # iOS App Store
 
-Bundle ID: `com.inteck.pitchin` (`mobile/app.json`). Encryption export: `ITSAppUsesNonExemptEncryption = false`.
+Bundle ID: `com.inteck.subup` (`mobile/app.json`). Encryption export: `ITSAppUsesNonExemptEncryption = false`.
 
 ## Certificates and build
 
@@ -10,8 +10,14 @@ Bundle ID: `com.inteck.pitchin` (`mobile/app.json`). Encryption export: `ITSAppU
 
 ## App Store Connect
 
-- Privacy Policy **https URL** (stores reject in-app-only copy)
-- Support URL
+Hosted copy lives in [`site/`](../site/). Until the marketing site exists, publish that folder (see [`site/README.md`](../site/README.md)) and paste:
+
+- **Support URL** / Marketing URL: `https://YOUR-HOST/` (`index.html`)
+- **Privacy Policy URL**: `https://YOUR-HOST/privacy.html`
+- Terms of Use (optional): `https://YOUR-HOST/terms.html`
+
+Stores reject in-app-only legal copy.
+
 - Subtitle, description, keywords
 - Screenshots: 6.7" and 6.5" iPhone (and iPad if you keep `supportsTablet`)
 - Age rating / no kids-directed content

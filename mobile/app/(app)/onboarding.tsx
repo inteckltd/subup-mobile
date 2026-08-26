@@ -23,7 +23,7 @@ const PAGES = [
   {
     icon: 'person-add-outline' as const,
     title: 'Invite by mobile',
-    body: 'Send an invite to a UK mobile number. If they don\'t have PitchIn yet, they get a text with a download link.',
+    body: 'Send an invite to a UK mobile number. If they don\'t have SubUp yet, they get a text with a download link.',
   },
 ];
 

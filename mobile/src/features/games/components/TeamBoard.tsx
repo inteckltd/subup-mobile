@@ -28,7 +28,7 @@ function highlightBorder(color: TeamColor, highlight: boolean): string {
 
 function highlightFill(color: TeamColor, highlight: boolean): string {
   if (!highlight) return colors.white;
-  return color.id === 'white' ? '#F4F6F5' : `${color.hex}14`;
+  return color.id === 'white' ? colors.background : `${color.hex}14`;
 }
 
 type DragActive = {

@@ -3,6 +3,7 @@ import { BlurView } from 'expo-blur';
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BrandLogo } from '../../../theme/BrandLogo';
 import { colors } from '../../../theme/tokens';
 import type { Profile } from '../../../types';
 import { useUnreadNotificationCount } from '../../notifications/hooks';
@@ -19,8 +20,8 @@ type HomeHeaderProps = {
 };
 
 /**
- * The green hero header — wordmark, notifications/profile chrome, greeting,
- * and MMR chip. The PitchIn mark is not tappable. Small avatar goes to
+ * The navy hero header — logo, notifications/profile chrome, greeting,
+ * and MMR chip. The SubUp mark is not tappable. Small avatar goes to
  * Profile when `onPressSmallAvatar` is passed. Large avatar opens a photo
  * lightbox. Pass `onPressEdit` on Profile to show the pencil overlay.
  * Pass `onPressSettings` on Home, Games, and Profile for the gear.
@@ -46,10 +47,7 @@ export function HomeHeader({
     <View className="w-full gap-6 rounded-b-[40px] bg-primary px-6 pb-20" style={{ paddingTop: insets.top + 16 }}>
       <View className="flex-row items-center justify-between">
         <View className="flex-row items-center gap-2">
-          <View className="h-8 w-8 -rotate-3 items-center justify-center rounded-lg bg-accent">
-            <Ionicons name="people" size={18} color={colors.primary} />
-          </View>
-          <Text className="font-sans-extrabold text-xl uppercase tracking-tight text-white">PitchIn</Text>
+          <BrandLogo height={28} />
         </View>
 
         <View className="flex-row items-center gap-3">

@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator, Pressable, PressableProps, Text } from 'react-native';
 
+import { colors } from '../../../theme/tokens';
+
 type PrimaryButtonProps = PressableProps & {
   label: string;
   loading?: boolean;
@@ -29,11 +31,11 @@ export function PrimaryButton({
       {...pressableProps}
     >
       {loading ? (
-        <ActivityIndicator color={isPrimary ? '#FFFFFF' : '#0B6E4F'} />
+        <ActivityIndicator color={isPrimary ? colors.white : colors.primary} />
       ) : (
         <>
           <Text className={`font-sans-bold text-base ${isPrimary ? 'text-white' : 'text-ink'}`}>{label}</Text>
-          {icon ? <Ionicons name={icon} size={16} color={isPrimary ? '#FFFFFF' : '#121212'} /> : null}
+          {icon ? <Ionicons name={icon} size={16} color={isPrimary ? colors.white : colors.ink} /> : null}
         </>
       )}
     </Pressable>

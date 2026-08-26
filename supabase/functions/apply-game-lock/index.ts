@@ -1,4 +1,4 @@
-// PitchIn — apply-game-lock Edge Function.
+// SubUp — apply-game-lock Edge Function.
 //
 // Scheduled sweep (pg_cron + pg_net, every 5 minutes) that:
 //   * cancels games still below min at lock time

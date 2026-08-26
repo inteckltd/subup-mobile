@@ -149,7 +149,7 @@ export async function fetchGroupPendingInvites(groupId: string): Promise<GroupPe
   return ((data ?? []) as GroupPendingInviteRow[]).map((row) => ({
     id: row.invite_id,
     userId: row.invited_user_id,
-    name: row.awaiting_signup ? 'Waiting to download PitchIn' : (row.full_name ?? 'Unknown player'),
+    name: row.awaiting_signup ? 'Waiting to download SubUp' : (row.full_name ?? 'Unknown player'),
     avatarUrl: row.avatar_url,
     awaitingSignup: row.awaiting_signup,
     createdAt: row.created_at,

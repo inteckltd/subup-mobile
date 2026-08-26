@@ -14,6 +14,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -36,23 +37,25 @@ function RootLayout() {
   });
 
   return (
-    <SafeAreaProvider>
-      <KeyboardProvider>
-        <QueryClientProvider client={queryClient}>
-          <ConnectivityProvider>
-            <AuthProvider>
-              <StripeProvider
-                publishableKey={env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? ''}
-                merchantIdentifier="merchant.com.inteck.pitchin"
-                urlScheme="pitchin"
-              >
-                <RootNavigator fontsLoaded={fontsLoaded} />
-              </StripeProvider>
-            </AuthProvider>
-          </ConnectivityProvider>
-        </QueryClientProvider>
-      </KeyboardProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <KeyboardProvider>
+          <QueryClientProvider client={queryClient}>
+            <ConnectivityProvider>
+              <AuthProvider>
+                <StripeProvider
+                  publishableKey={env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? ''}
+                  merchantIdentifier="merchant.com.inteck.pitchin"
+                  urlScheme="subup"
+                >
+                  <RootNavigator fontsLoaded={fontsLoaded} />
+                </StripeProvider>
+              </AuthProvider>
+            </ConnectivityProvider>
+          </QueryClientProvider>
+        </KeyboardProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

@@ -53,7 +53,7 @@ export default function LoginScreen() {
     <AuthScreenLayout
       title="Welcome "
       titleAccent="back."
-      subtitle="Log in to your PitchIn account"
+      subtitle="Log in to your SubUp account"
       heroImage={require('../../assets/images/auth-hero-login.jpg')}
     >
       <Controller

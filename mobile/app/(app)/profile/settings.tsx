@@ -76,7 +76,7 @@ export default function SettingsScreen() {
 
   async function copyDiagnostics() {
     const blob = [
-      'PitchIn diagnostics',
+      'SubUp diagnostics',
       `version: ${version}`,
       `build: ${build}`,
       `platform: ${Platform.OS}`,

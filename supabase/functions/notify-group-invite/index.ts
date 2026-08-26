@@ -1,4 +1,4 @@
-// PitchIn — notify-group-invite Edge Function.
+// SubUp — notify-group-invite Edge Function.
 //
 // Best-effort delivery for a group invite the client just created via
 // `invite_group_member`. Existing users get Expo push (inbox row already
@@ -157,7 +157,7 @@ Deno.serve(async (req) => {
     ]);
 
     const groupName = group?.name ?? 'a group';
-    const body = `${firstName(inviter?.full_name)} invited you to ${groupName} on PitchIn. Download the app: ${inviteAppUrl}`;
+    const body = `${firstName(inviter?.full_name)} invited you to ${groupName} on SubUp. Download the app: ${inviteAppUrl}`;
     const sms = await sendInviteSms(inviteRow.mobile, body);
     if (!sms.ok) {
       console.error('[notify-group-invite] Twilio SMS failed', sms.error);

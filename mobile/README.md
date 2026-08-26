@@ -1,4 +1,4 @@
-# PitchIn mobile (Expo)
+# SubUp mobile (Expo)
 
 React Native app. Talks to Supabase (Auth, Postgres, Storage, Edge Functions).
 

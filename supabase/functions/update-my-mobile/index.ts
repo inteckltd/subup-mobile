@@ -1,4 +1,4 @@
-// PitchIn — update-my-mobile Edge Function.
+// SubUp — update-my-mobile Edge Function.
 //
 // Two-step phone change: send an OTP to the new UK number, then verify it
 // before updating Auth phone + profiles.mobile. Never trusts a client user id.
@@ -52,7 +52,7 @@ async function sendOtpSms(to: string, code: string): Promise<{ ok: boolean; erro
     body: new URLSearchParams({
       To: to,
       From: from,
-      Body: `Your PitchIn code is ${code}. It expires in 10 minutes.`,
+      Body: `Your SubUp code is ${code}. It expires in 10 minutes.`,
     }),
   });
 

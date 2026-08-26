@@ -1,7 +1,7 @@
 /**
  * UK-locale date/time and price formatting for Home's game cards.
  * All date/time formatting is pinned to the `Europe/London` timezone
- * regardless of device locale/timezone, since PitchIn is a UK product.
+ * regardless of device locale/timezone, since SubUp is a UK product.
  */
 
 const LONDON_TZ = 'Europe/London';

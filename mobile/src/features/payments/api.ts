@@ -177,8 +177,8 @@ export async function payToJoinGame(gameId: string): Promise<{ error?: string }>
 
   const init = await initPaymentSheet({
     paymentIntentClientSecret: data.clientSecret as string,
-    merchantDisplayName: 'PitchIn',
-    returnURL: 'pitchin://stripe-redirect',
+    merchantDisplayName: 'SubUp',
+    returnURL: 'subup://stripe-redirect',
     googlePay: { merchantCountryCode: 'GB', testEnv: true, currencyCode: 'GBP' },
     applePay: { merchantCountryCode: 'GB' },
   });

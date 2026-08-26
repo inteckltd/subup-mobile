@@ -339,7 +339,7 @@ export default function CreateGameScreen() {
             <View className="w-full gap-1.5 border-t border-[#F9FAFB] pt-3">
               <Text className="font-sans-bold text-xs text-muted">Pitch cost per player</Text>
               <Text className="font-sans text-[10px] text-muted">
-                You receive this amount. Players pay this plus a PitchIn fee in the app.
+                You receive this amount. Players pay this plus a SubUp fee in the app.
               </Text>
               <Controller
                 control={control}
@@ -367,7 +367,7 @@ export default function CreateGameScreen() {
               {priceCents > 0 ? (
                 <Text className="font-sans text-[10px] text-muted">
                   Players pay {formatGbp(playerTotalCents(priceCents))} ({formatGbp(priceCents)} +{' '}
-                  {formatGbp(pitchinServiceFeeCents(priceCents))} PitchIn fee)
+                  {formatGbp(pitchinServiceFeeCents(priceCents))} SubUp fee)
                 </Text>
               ) : null}
               {priceCents > 0 && !payoutsReady && watchedGroupId ? (

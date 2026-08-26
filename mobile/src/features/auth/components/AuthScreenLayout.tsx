@@ -5,7 +5,7 @@ import { AuthHeroHeader } from './AuthHeroHeader';
 
 type AuthScreenLayoutProps = {
   title: string;
-  /** The part of the title rendered in the brand-green accent colour, e.g. "Squad." in "Join the Squad." */
+  /** The part of the title rendered in the brand primary colour, e.g. "Squad." in "Join the Squad." */
   titleAccent?: string;
   subtitle: React.ReactNode;
   showBack?: boolean;

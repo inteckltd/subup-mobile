@@ -1,4 +1,4 @@
-// PitchIn — delete-my-account Edge Function.
+// SubUp — delete-my-account Edge Function.
 //
 // 1. Verify the caller's JWT.
 // 2. Run delete_my_account() (memberships, sole-member groups, upcoming spots).

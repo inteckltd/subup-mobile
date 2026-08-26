@@ -16,7 +16,7 @@ function businessProfile() {
   return {
     mcc: '7941',
     url: Deno.env.get('INVITE_APP_URL') || 'https://pitchin.app',
-    product_description: 'Collecting pitch fees for private recreational sports groups on PitchIn',
+    product_description: 'Collecting pitch fees for private recreational sports groups on SubUp',
   };
 }
 

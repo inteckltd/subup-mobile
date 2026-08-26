@@ -59,7 +59,7 @@ export default function EditProfileScreen() {
   async function pickPhoto() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Photo access needed', 'Allow PitchIn to access your photos to change your profile photo.');
+      Alert.alert('Photo access needed', 'Allow SubUp to access your photos to change your profile photo.');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({

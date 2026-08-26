@@ -15,8 +15,8 @@ Temporary list of work that is **still required** after the security / simplicit
 
 ## Legal and trust
 
-- [ ] Solicitor review of in-app Terms + Privacy (`mobile/src/features/legal/copy.tsx` is a complete **draft**)
-- [ ] Hosted **https** Terms and Privacy URLs for both stores
+- [ ] Solicitor review of in-app Terms + Privacy (`mobile/src/features/legal/copy.tsx` is a complete **draft**; same text in `site/`)
+- [ ] Host the `site/` pages on **https** (Netlify Drop is fastest; GitHub Pages workflow is in the repo) and paste URLs into both stores
 - [ ] Bump `TERMS_VERSION` / `PRIVACY_VERSION` after the lawyer text lands
 - [ ] Apple Privacy Nutrition + Google Data safety aligned with the policy
 
