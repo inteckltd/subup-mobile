@@ -26,11 +26,11 @@ EXPO_PUBLIC_SUPABASE_URL
 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 EXPO_PUBLIC_SENTRY_DSN
 EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY
-EXPO_PUBLIC_INVITE_APP_URL   # public download / landing URL for WhatsApp + Messages share
+EXPO_PUBLIC_INVITE_APP_URL   # landing URL for invite SMS; WhatsApp/Messages use store listings
 SENTRY_AUTH_TOKEN          # source maps via the Sentry Expo plugin
 ```
 
-`EXPO_PUBLIC_INVITE_APP_URL` is the client-side counterpart of the Edge Function secret `INVITE_APP_URL`. The app falls back to `https://pitchin.app` if it is unset.
+`EXPO_PUBLIC_INVITE_APP_URL` is the client-side counterpart of the Edge Function secret `INVITE_APP_URL`. Both fall back to `https://www.subupapp.co.uk` if unset. Invite WhatsApp/Messages share includes the live App Store and Play Store URLs directly.
 
 `SENTRY_ALLOW_FAILURE` is `true` on preview/production today so a missing token does not fail the build. Watch Sentry uploads before a real store ship.
 
@@ -42,7 +42,7 @@ supabase secrets set SENTRY_DSN=<sentry-ingest-dsn>
 supabase secrets set TWILIO_ACCOUNT_SID=ACxxxxxxxx
 supabase secrets set TWILIO_AUTH_TOKEN=xxxxxxxx
 supabase secrets set TWILIO_FROM_NUMBER=+44xxxxxxxxxx
-supabase secrets set INVITE_APP_URL=https://your-testflight-or-landing-url
+supabase secrets set INVITE_APP_URL=https://www.subupapp.co.uk
 supabase secrets set STRIPE_SECRET_KEY=sk_test_...
 supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_...
 ```
@@ -82,7 +82,7 @@ Same Account SID + Auth Token go in **two** places (never commit them):
 
 Trial: enable UK geo, verify destination numbers, expect the trial prefix. Production: paid sender, no trial prefix. Alphanumeric `SubUp` needs a paid account.
 
-`INVITE_APP_URL` is the download link in invite texts (TestFlight, Play internal track, or a landing page). Set the same URL as `EXPO_PUBLIC_INVITE_APP_URL` in the mobile app / EAS so WhatsApp and Messages share the same link.
+`INVITE_APP_URL` is the download link in invite SMS (landing page is fine now the stores are live). Set the same URL as `EXPO_PUBLIC_INVITE_APP_URL` in EAS so SMS and the website stay aligned. WhatsApp and Messages share include the App Store and Play Store URLs directly.
 
 ## Cron Vault (once per project)
 

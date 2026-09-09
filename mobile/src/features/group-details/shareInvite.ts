@@ -1,7 +1,5 @@
 import { Linking, Platform, Share } from 'react-native';
 
-import { normalizeUkMobile } from '../../lib/phone';
-
 export function inviteShareFirstName(fullName: string | null | undefined): string {
   const part = fullName?.trim().split(/\s+/)[0];
   return part || 'A teammate';
@@ -10,32 +8,17 @@ export function inviteShareFirstName(fullName: string | null | undefined): strin
 export function buildInviteShareMessage(input: {
   firstName: string;
   groupName: string;
-  url: string;
-  existingUser?: boolean;
+  joinUrl: string;
 }): string {
-  if (input.existingUser) {
-    return `${input.firstName} invited you to ${input.groupName} on SubUp. Open the app to accept.`;
-  }
-  return `${input.firstName} invited you to ${input.groupName} on SubUp. Download the app: ${input.url}`;
+  return `${input.firstName} invited you to ${input.groupName} on SubUp. Join here: ${input.joinUrl}`;
 }
 
-/** wa.me / WhatsApp send URLs want digits only (447…), no plus. */
-function whatsappPhoneDigits(mobileInput?: string): string | null {
-  const e164 = mobileInput ? normalizeUkMobile(mobileInput) : null;
-  return e164 ? e164.slice(1) : null;
-}
-
-function smsRecipient(mobileInput?: string): string | null {
-  return mobileInput ? normalizeUkMobile(mobileInput) : null;
-}
-
-function smsUrl(message: string, mobileInput?: string): string {
+function smsUrl(message: string): string {
   const body = encodeURIComponent(message);
-  const to = smsRecipient(mobileInput);
   if (Platform.OS === 'ios') {
-    return to ? `sms:${to}&body=${body}` : `sms:&body=${body}`;
+    return `sms:&body=${body}`;
   }
-  return to ? `sms:${to}?body=${body}` : `sms:?body=${body}`;
+  return `sms:?body=${body}`;
 }
 
 async function fallbackShare(message: string): Promise<void> {
@@ -54,14 +37,19 @@ async function openOrShare(url: string, message: string): Promise<void> {
   }
 }
 
-export async function shareInviteViaWhatsApp(message: string, mobileInput?: string): Promise<void> {
-  const phone = whatsappPhoneDigits(mobileInput);
+/** Probe the scheme only — a full send URL can make canOpenURL return false. */
+const WHATSAPP_SCHEME = 'whatsapp://send';
+
+export async function shareInviteViaWhatsApp(message: string): Promise<void> {
   const text = encodeURIComponent(message);
-  const nativeUrl = phone ? `whatsapp://send?phone=${phone}&text=${text}` : `whatsapp://send?text=${text}`;
-  const webUrl = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
+  // Do not put a phone on the URL. WhatsApp then looks that number up:
+  // unregistered contacts get an "Invite via SMS" dialog on Android, and
+  // `whatsapp://send?phone=&text=` is a no-op on iOS.
+  const nativeUrl = `${WHATSAPP_SCHEME}?text=${text}`;
+  const webUrl = `https://wa.me/?text=${text}`;
 
   try {
-    if (await Linking.canOpenURL(nativeUrl)) {
+    if (await Linking.canOpenURL(WHATSAPP_SCHEME)) {
       await Linking.openURL(nativeUrl);
       return;
     }
@@ -71,6 +59,6 @@ export async function shareInviteViaWhatsApp(message: string, mobileInput?: stri
   }
 }
 
-export async function shareInviteViaSms(message: string, mobileInput?: string): Promise<void> {
-  await openOrShare(smsUrl(message, mobileInput), message);
+export async function shareInviteViaSms(message: string): Promise<void> {
+  await openOrShare(smsUrl(message), message);
 }

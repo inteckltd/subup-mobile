@@ -349,7 +349,7 @@ export default function GroupDetailsScreen() {
                   <EmptyState
                     icon="mail-outline"
                     title="No pending invites"
-                    subtitle={isAdmin ? 'Invite someone by their UK mobile number.' : 'Pending invites will show up here.'}
+                    subtitle={isAdmin ? "Share the group's join link so people can tap to join." : 'Pending invites will show up here.'}
                   />
                 ) : (
                   <View className="gap-3">

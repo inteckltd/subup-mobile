@@ -73,7 +73,7 @@ export function PrivacyCopy() {
       </Para>
       <Para>
         Group members can see your name, photo, and rating — not your mobile or email — through the app. Group admins
-        enter a mobile number to invite you. You can delete your account in Settings; we remove memberships, upcoming
+        share a join link so you can join their group. You can delete your account in Settings; we remove memberships, upcoming
         spots, tokens, and your login. Past game history may show “Deleted user”.
       </Para>
       <Para>

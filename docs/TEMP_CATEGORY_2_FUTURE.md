@@ -32,7 +32,6 @@ Forgot-password uses Supabase Auth `signInWithOtp` (Dashboard rate limits). If a
 - Announcements / light chat
 - Reliability (show-up %) in the UI (`reliability_score` exists on profiles)
 - Per-sport or per-group MMR
-- Invite deep links (open Accept in-app, not only a download URL)
 
 ## Engineering
 

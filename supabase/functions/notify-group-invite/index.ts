@@ -143,9 +143,9 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: true, notified: 0, pushed: 0, sms: false, alreadySent: true });
     }
 
-    const inviteAppUrl = Deno.env.get('INVITE_APP_URL');
-    if (!inviteRow.mobile || !inviteAppUrl) {
-      const err = new Error('Invite SMS skipped: missing mobile or INVITE_APP_URL');
+    const inviteAppUrl = Deno.env.get('INVITE_APP_URL')?.trim() || 'https://www.subupapp.co.uk';
+    if (!inviteRow.mobile) {
+      const err = new Error('Invite SMS skipped: missing mobile');
       console.error('[notify-group-invite]', err.message);
       await captureEdgeError('notify-group-invite', err);
       return jsonResponse({ ok: true, notified: 0, pushed: 0, sms: false, error: err.message });

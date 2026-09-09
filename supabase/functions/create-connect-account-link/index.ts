@@ -5,7 +5,7 @@ import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import { accountTransfersEnabled, getStripe, jsonResponse, requireUserId } from '../_shared/stripe.ts';
 
-const FALLBACK_BUSINESS_URL = 'https://magical-torrone-d20b91.netlify.app';
+const FALLBACK_BUSINESS_URL = 'https://www.subupapp.co.uk';
 
 function connectRedirectUrl(to: 'return' | 'refresh'): string {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')?.trim().replace(/\/+$/, '');
@@ -177,8 +177,8 @@ Deno.serve(async (req) => {
         {
           ok: false,
           error: param
-            ? `Stripe rejected a URL (${param}). Set INVITE_APP_URL to your https site, e.g. https://magical-torrone-d20b91.netlify.app`
-            : 'Stripe rejected a URL. Set INVITE_APP_URL to your https site, e.g. https://magical-torrone-d20b91.netlify.app',
+            ? `Stripe rejected a URL (${param}). Set INVITE_APP_URL to your https site, e.g. https://www.subupapp.co.uk`
+            : 'Stripe rejected a URL. Set INVITE_APP_URL to your https site, e.g. https://www.subupapp.co.uk',
         },
         400,
       );

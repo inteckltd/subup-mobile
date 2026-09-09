@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const FALLBACK_INVITE_APP_URL = 'https://pitchin.app';
+const FALLBACK_INVITE_APP_URL = 'https://www.subupapp.co.uk';
 
 const envSchema = z.object({
   EXPO_PUBLIC_SUPABASE_URL: z.string().url({ message: 'EXPO_PUBLIC_SUPABASE_URL must be a valid URL' }),

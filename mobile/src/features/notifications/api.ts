@@ -13,6 +13,7 @@ const KNOWN = [
   'This invite is not for you',
   'This invite is no longer pending',
   'Invite not found',
+  'Too many attempts',
 ];
 
 function friendlyError(error: unknown, fallback = GENERIC_ERROR): string {

@@ -143,6 +143,29 @@ export function centsToPounds(cents: number): number {
   return cents / 100;
 }
 
+/** Keep at most one decimal point and two pence digits while typing £4.50. */
+export function sanitizePriceInput(raw: string): string {
+  const cleaned = raw.replace(/,/g, '.').replace(/[^0-9.]/g, '');
+  const dot = cleaned.indexOf('.');
+  if (dot === -1) return cleaned;
+  const whole = cleaned.slice(0, dot);
+  const fraction = cleaned.slice(dot + 1).replace(/\./g, '').slice(0, 2);
+  return `${whole}.${fraction}`;
+}
+
+export function parsePricePounds(text: string): number {
+  if (!text || text === '.') return 0;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Display helper for the price field — whole pounds as "5", pence as "4.50". */
+export function formatPriceField(pounds: number): string {
+  if (!Number.isFinite(pounds)) return '';
+  if (pounds === 0) return '0';
+  return Number.isInteger(pounds) ? String(pounds) : pounds.toFixed(2);
+}
+
 /** Extra Create Game check: kickoff must sit outside the group's leave-lock window. */
 export function createGameSchemaForLock(lockHours: number | null | undefined) {
   const hours = lockHours && lockHours > 0 ? lockHours : 0;

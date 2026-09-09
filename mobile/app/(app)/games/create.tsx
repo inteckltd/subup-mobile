@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -13,6 +13,7 @@ import { TextField } from '../../../src/features/auth/components/TextField';
 import { DateTimeField } from '../../../src/features/games/components/DateTimeField';
 import { DurationSelector } from '../../../src/features/games/components/DurationSelector';
 import { GroupSelect } from '../../../src/features/games/components/GroupSelect';
+import { PriceField } from '../../../src/features/games/components/PriceField';
 import { TeamColorSelector } from '../../../src/features/games/components/TeamColorSelector';
 import { ToggleRow } from '../../../src/features/games/components/ToggleRow';
 import { useCreatableGroups, useCreateGame, useGameDetail, useUpdateGame } from '../../../src/features/games/hooks';
@@ -345,22 +346,7 @@ export default function CreateGameScreen() {
                 control={control}
                 name="pricePounds"
                 render={({ field }) => (
-                  <View className="w-full flex-row items-center rounded-xl bg-background px-4 py-3">
-                    <Text className="font-sans-bold text-base text-muted">£</Text>
-                    <TextInput
-                      className="ml-2 flex-1 font-sans-bold text-sm text-ink"
-                      style={{ includeFontPadding: false, padding: 0 }}
-                      keyboardType="decimal-pad"
-                      placeholder="0.00"
-                      placeholderTextColor="#D1D5DB"
-                      value={String(field.value)}
-                      onChangeText={(text) => {
-                        const parsed = Number(text.replace(/[^0-9.]/g, ''));
-                        field.onChange(Number.isFinite(parsed) ? parsed : 0);
-                      }}
-                      onBlur={field.onBlur}
-                    />
-                  </View>
+                  <PriceField value={field.value} onChange={field.onChange} onBlur={field.onBlur} />
                 )}
               />
               {errors.pricePounds ? <Text className="font-sans-medium text-xs text-danger">{errors.pricePounds.message}</Text> : null}

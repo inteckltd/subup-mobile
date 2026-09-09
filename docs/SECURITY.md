@@ -11,6 +11,7 @@ A stolen **publishable / anon key is expected** (it ships in the app). Defence i
 - Profile stats and `profiles.mobile` cannot be updated by the role `authenticated` (triggers). Mobile changes use `update-my-mobile` (OTP) or `confirm_my_mobile` after Auth OTP.
 - Group-mates cannot `SELECT` another profile’s mobile or email. Rosters use `get_group_members` / `get_game_lobby_players`.
 - Notifications have no client INSERT. Own-row SELECT / UPDATE / DELETE only.
+- `group_join_links` has no client table grants. Admins read a token via `get_group_join_token`; anyone with the URL can `preview_group_join_link`; signed-in users join via `claim_group_join_link`.
 - Storage writes are `{auth.uid()}/...`. Buckets are public-read (avatars / covers).
 - Account deletion is `delete-my-account` (JWT + service role).
 
@@ -19,6 +20,7 @@ A stolen **publishable / anon key is expected** (it ships in the app). Defence i
 | Action | Limit |
 |--------|--------|
 | `invite_group_member` | 20 / hour / user |
+| `claim_group_join_link` | 30 / hour / user |
 | `is_email_taken` | 10 / hour / IP (or `anon`) |
 | `is_mobile_taken` | 20 / hour / user |
 | Phone-change OTP | 3 / hour / user (Edge Function) |

@@ -121,6 +121,8 @@ const MUTATION_MESSAGES = [
   'This person is already a member of the group',
   'This person has already been invited',
   'Only group admins can invite members',
+  'Only group admins can share a join link',
+  'Invite not found',
   'Only group admins can edit this group',
   'Only group admins can promote members',
   'Only group admins can remove members',
@@ -200,6 +202,56 @@ export async function inviteGroupMember(
     }
   }
   return { inviteId: inviteId ?? undefined, existingUser };
+}
+
+export async function getGroupJoinToken(groupId: string): Promise<{ token?: string; error?: string }> {
+  const { data, error } = await supabase.rpc('get_group_join_token', { p_group_id: groupId });
+  if (error) return { error: mutationError(error, "Couldn't load the join link.") };
+  const token = typeof data === 'string' ? data : null;
+  if (!token) return { error: "Couldn't load the join link." };
+  return { token };
+}
+
+export type JoinLinkPreview = {
+  groupId: string;
+  groupName: string;
+  sport: string;
+};
+
+export async function previewGroupJoinLink(token: string): Promise<JoinLinkPreview | null> {
+  const { data, error } = await supabase.rpc('preview_group_join_link', { p_token: token });
+  if (error) throw friendlyError(error);
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { group_id: string; group_name: string; sport: string }
+    | null
+    | undefined;
+  if (!row) return null;
+  return { groupId: row.group_id, groupName: row.group_name, sport: row.sport };
+}
+
+export type JoinLinkClaim = {
+  inviteId: string | null;
+  groupId: string;
+  groupName: string;
+  alreadyMember: boolean;
+};
+
+export async function claimGroupJoinLink(token: string): Promise<{ claim?: JoinLinkClaim; error?: string }> {
+  const { data, error } = await supabase.rpc('claim_group_join_link', { p_token: token });
+  if (error) return { error: mutationError(error, "Couldn't open this invite.") };
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { invite_id: string | null; group_id: string; group_name: string; already_member: boolean }
+    | null
+    | undefined;
+  if (!row) return { error: 'Invite not found' };
+  return {
+    claim: {
+      inviteId: row.invite_id,
+      groupId: row.group_id,
+      groupName: row.group_name,
+      alreadyMember: row.already_member,
+    },
+  };
 }
 
 export async function leaveGroup(groupId: string): Promise<{ error?: string }> {

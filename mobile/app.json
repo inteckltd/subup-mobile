@@ -3,7 +3,7 @@
     "name": "SubUp",
     "slug": "pitchin",
     "scheme": "subup",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -13,7 +13,7 @@
       "bundleIdentifier": "com.inteck.subup",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "LSApplicationQueriesSchemes": ["whatsapp"]
+        "LSApplicationQueriesSchemes": ["whatsapp", "whatsapp-business"]
       }
     },
     "android": {
@@ -32,6 +32,7 @@
       "bundler": "metro"
     },
     "plugins": [
+      "./plugins/withShareQueries",
       "expo-router",
       "expo-secure-store",
       "expo-font",

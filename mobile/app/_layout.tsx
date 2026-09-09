@@ -10,7 +10,7 @@ import {
 } from '@expo-google-fonts/manrope';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments, type Href } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { View } from 'react-native';
@@ -18,6 +18,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { peekPendingJoinToken } from '../src/features/group-details/joinLink';
 import { env } from '../src/lib/env';
 import { queryClient } from '../src/lib/queryClient';
 import { initSentry, Sentry } from '../src/lib/sentry';
@@ -98,6 +99,20 @@ function RootNavigator({ fontsLoaded }: { fontsLoaded: boolean }) {
     router.replace('/reset-password');
   }, [passwordRecovery, ready, router, segments, session]);
 
+  useEffect(() => {
+    if (!ready || !isFullyAuthed) return;
+    if (String(segments[0]) === 'join') return;
+    let cancelled = false;
+    void (async () => {
+      const token = await peekPendingJoinToken();
+      if (cancelled || !token) return;
+      router.replace(`/join/${token}` as Href);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isFullyAuthed, ready, router, segments]);
+
   if (!ready) {
     return <View style={{ flex: 1, backgroundColor: colors.background }} />;
   }
@@ -113,6 +128,7 @@ function RootNavigator({ fontsLoaded }: { fontsLoaded: boolean }) {
       <Stack.Protected guard={!isFullyAuthed && !needsLegal}>
         <Stack.Screen name="(auth)" />
       </Stack.Protected>
+      <Stack.Screen name="join/[token]" />
       <Stack.Screen name="terms" />
       <Stack.Screen name="privacy" />
     </Stack>

@@ -22,8 +22,8 @@ const PAGES = [
   },
   {
     icon: 'person-add-outline' as const,
-    title: 'Invite by mobile',
-    body: 'Send an invite to a UK mobile number. If they don\'t have SubUp yet, they get a text with a download link.',
+    title: 'Invite your squad',
+    body: "Copy the group's join link or send it on WhatsApp. Anyone who opens it can join after they sign in.",
   },
 ];
 

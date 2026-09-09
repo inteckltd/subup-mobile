@@ -32,7 +32,7 @@ export function SetupChecklist({ progress, onDismiss, onCreateGroup, onInvite, o
     {
       key: 'invite',
       title: 'Invite your squad',
-      subtitle: 'Send an invite — we text them a download link if they are new',
+      subtitle: 'Share the join link in WhatsApp or Messages',
       done: progress.invitedSquad,
       onPress: onInvite,
     },
