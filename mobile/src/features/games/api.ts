@@ -407,6 +407,7 @@ export async function fetchMotmBallot(gameId: string): Promise<MotmBallotModel |
     myVoteUserId: first.my_vote_user_id,
     motmUserId: first.motm_user_id,
     motmName: first.motm_name,
+    voteTotal: first.vote_total,
     candidates: rows
       .filter((row) => row.candidate_user_id)
       .map((row) => ({
@@ -414,6 +415,7 @@ export async function fetchMotmBallot(gameId: string): Promise<MotmBallotModel |
         name: row.candidate_name ?? 'Unknown player',
         avatarUrl: row.candidate_avatar_url,
         mmr: row.candidate_mmr ?? 1000,
+        voteCount: row.candidate_vote_count,
       })),
   };
 }

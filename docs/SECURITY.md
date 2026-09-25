@@ -32,7 +32,7 @@ Invite SMS is **once per invite** (`group_invites.sms_sent_at`). Repeat POSTs to
 
 User-facing functions verify the JWT with the anon key, then use `service_role` only if the caller can see the row under RLS.
 
-Cron functions (`apply-game-lock`, `close-motm-votes`, `send-score-reminders`) have `verify_jwt = false` in `supabase/config.toml` and compare `x-cron-secret` in constant time. `stripe-webhooks` is also `verify_jwt = false` and checks the Stripe signature instead. Do not add more unverified functions.
+Cron functions (`apply-game-lock`, `close-motm-votes`, `send-score-reminders`, `send-lock-reminders`) have `verify_jwt = false` in `supabase/config.toml` and compare `x-cron-secret` in constant time. `stripe-webhooks` is also `verify_jwt = false` and checks the Stripe signature instead. Do not add more unverified functions.
 
 CORS is `*` while the only client is native. Lock this down if you add a browser app.
 

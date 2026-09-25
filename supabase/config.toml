@@ -15,6 +15,9 @@ verify_jwt = false
 [functions.apply-game-lock]
 verify_jwt = false
 
+[functions.send-lock-reminders]
+verify_jwt = false
+
 [functions.stripe-webhooks]
 verify_jwt = false
 

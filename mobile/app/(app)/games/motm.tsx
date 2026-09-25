@@ -6,12 +6,28 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
 import { useMotmBallot, useVoteMotm } from '../../../src/features/games/hooks';
+import type { MotmBallotModel } from '../../../src/features/games/types';
 import { Avatar } from '../../../src/features/home/components/Avatar';
 import { EmptyState } from '../../../src/features/home/components/EmptyState';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { formatCountdown } from '../../../src/lib/format';
 import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
 import { colors } from '../../../src/theme/tokens';
+
+function leadingVoteCount(ballot: MotmBallotModel): number {
+  return ballot.candidates.reduce((max, candidate) => Math.max(max, candidate.voteCount ?? 0), 0);
+}
+
+function isMotmTie(ballot: MotmBallotModel): boolean {
+  const lead = leadingVoteCount(ballot);
+  if (lead <= 0) return false;
+  return ballot.candidates.filter((candidate) => (candidate.voteCount ?? 0) === lead).length > 1;
+}
+
+function motmBarWidth(voteCount: number | null, lead: number): number {
+  if (voteCount == null || lead <= 0) return 0;
+  return Math.round((voteCount / lead) * 100);
+}
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(() => new Date());
@@ -33,6 +49,7 @@ export default function MotmVoteScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const ballot = ballotQuery.data;
+  const leadVotes = ballot ? leadingVoteCount(ballot) : 0;
   const selected = selectedId ?? ballot?.myVoteUserId ?? null;
   const isDirty = ballot?.isOpen === true && selectedId != null && selectedId !== ballot.myVoteUserId;
   const { allowLeave } = useUnsavedChangesGuard(isDirty);
@@ -78,6 +95,14 @@ export default function MotmVoteScreen() {
               ) : (
                 <Text className="font-sans text-sm text-muted">Voting has closed.</Text>
               )}
+              {!ballot.isOpen && ballot.voteTotal != null ? (
+                <Text className="font-sans text-sm text-muted">
+                  {ballot.voteTotal} {ballot.voteTotal === 1 ? 'vote' : 'votes'}
+                </Text>
+              ) : null}
+              {!ballot.isOpen && isMotmTie(ballot) ? (
+                <Text className="font-sans text-sm text-muted">Tied — winner decided by tie-break</Text>
+              ) : null}
             </View>
 
             {ballot.candidates.length === 0 ? (
@@ -90,19 +115,41 @@ export default function MotmVoteScreen() {
               <View className="overflow-hidden rounded-3xl border border-border bg-white">
                 {ballot.candidates.map((candidate, index) => {
                   const isSelected = selected === candidate.userId;
+                  const isWinner = !ballot.isOpen && ballot.motmUserId === candidate.userId;
+                  const voteCount = candidate.voteCount;
+                  const barWidth = motmBarWidth(voteCount, leadVotes);
                   return (
                     <Pressable
                       key={candidate.userId}
                       disabled={!ballot.isOpen}
                       onPress={() => setSelectedId(candidate.userId)}
-                      className={`flex-row items-center gap-3 px-4 py-4 ${index > 0 ? 'border-t border-[#F9FAFB]' : ''} ${isSelected ? 'bg-accent/15' : ''}`}
+                      className={`gap-2 px-4 py-4 ${index > 0 ? 'border-t border-[#F9FAFB]' : ''} ${
+                        isWinner ? 'bg-accent/15' : isSelected ? 'bg-accent/15' : ''
+                      }`}
                     >
-                      <Avatar uri={candidate.avatarUrl} name={candidate.name} size={44} />
-                      <View className="flex-1">
-                        <Text className="font-sans-bold text-sm text-ink">{candidate.name}</Text>
-                        <Text className="font-sans text-[10px] text-muted">MMR {candidate.mmr}</Text>
+                      <View className="flex-row items-center gap-3">
+                        <Avatar uri={candidate.avatarUrl} name={candidate.name} size={44} />
+                        <View className="flex-1">
+                          <Text className="font-sans-bold text-sm text-ink">{candidate.name}</Text>
+                          <Text className="font-sans text-[10px] text-muted">
+                            {isWinner ? 'Man of the Match' : `MMR ${candidate.mmr}`}
+                          </Text>
+                        </View>
+                        {!ballot.isOpen && voteCount != null ? (
+                          <Text className="font-sans-bold text-sm text-ink">
+                            {voteCount} {voteCount === 1 ? 'vote' : 'votes'}
+                          </Text>
+                        ) : null}
+                        {isWinner ? <Ionicons name="trophy" size={20} color={colors.gold} /> : null}
+                        {ballot.isOpen && isSelected ? (
+                          <Ionicons name="checkmark-circle" size={22} color={colors.primary} />
+                        ) : null}
                       </View>
-                      {isSelected ? <Ionicons name="checkmark-circle" size={22} color={colors.primary} /> : null}
+                      {!ballot.isOpen && voteCount != null ? (
+                        <View className="h-1.5 overflow-hidden rounded-full bg-border">
+                          <View className="h-full rounded-full bg-primary" style={{ width: `${barWidth}%` }} />
+                        </View>
+                      ) : null}
                     </Pressable>
                   );
                 })}

@@ -11,6 +11,7 @@ import {
   formatLockDeadline,
   hasGameEnded,
   isInsideLockWindow,
+  lockDeadlineAt,
 } from '../../../src/lib/format';
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
 import { EmptyState } from '../../../src/features/home/components/EmptyState';
@@ -232,6 +233,23 @@ export default function GameDetailsScreen() {
             </View>
           </View>
 
+          {!confirmed && !insideLock && !isFinished && lockHours > 0 ? (
+            <View className="gap-1">
+              <View className="flex-row items-center justify-between rounded-2xl border border-border bg-background px-4 py-3">
+                <View>
+                  <Text className="font-sans-bold text-[10px] uppercase tracking-wider text-muted">Locks in</Text>
+                  <Text className="font-sans-bold text-lg text-ink">
+                    {formatCountdown(lockDeadlineAt(game.startsAt, lockHours).toISOString(), now)}
+                  </Text>
+                </View>
+                <Ionicons name="lock-closed-outline" size={18} color={colors.muted} />
+              </View>
+              <Text className="font-sans text-[11px] text-muted">
+                Join or leave until {formatLockDeadline(game.startsAt, lockHours)}
+              </Text>
+            </View>
+          ) : null}
+
           {isCancelled ? (
             <View className="flex-row items-center justify-between rounded-2xl bg-[#FEF2F2] p-4">
               <View>
@@ -366,7 +384,9 @@ export default function GameDetailsScreen() {
             </View>
             {game.scoreNotes ? <Text className="font-sans text-sm text-muted">{game.scoreNotes}</Text> : null}
             {game.motmName ? (
-              <Text className="pt-2 text-center font-sans-bold text-sm text-primary">MOTM: {game.motmName}</Text>
+              <Pressable onPress={() => router.push(`/games/motm?gameId=${game.id}`)}>
+                <Text className="pt-2 text-center font-sans-bold text-sm text-primary">MOTM: {game.motmName}</Text>
+              </Pressable>
             ) : null}
           </View>
         ) : null}
@@ -454,15 +474,21 @@ export default function GameDetailsScreen() {
               onPress={() => router.push(`/games/motm?gameId=${game.id}`)}
             />
           ) : isCompleted && game.motmName ? (
-            <View className="w-full flex-row items-center justify-center gap-1.5 rounded-control bg-background py-4">
+            <Pressable
+              onPress={() => router.push(`/games/motm?gameId=${game.id}`)}
+              className="w-full flex-row items-center justify-center gap-1.5 rounded-control bg-background py-4"
+            >
               <Ionicons name="trophy" size={14} color={colors.primary} />
               <Text className="font-sans-bold text-sm text-ink">MOTM: {game.motmName}</Text>
-            </View>
+            </Pressable>
           ) : isCompleted ? (
-            <View className="w-full flex-row items-center justify-center gap-1.5 rounded-control bg-background py-4">
+            <Pressable
+              onPress={() => router.push(`/games/motm?gameId=${game.id}`)}
+              className="w-full flex-row items-center justify-center gap-1.5 rounded-control bg-background py-4"
+            >
               <Ionicons name="hourglass-outline" size={14} color={colors.muted} />
               <Text className="font-sans-bold text-sm text-muted">MOTM voting closed</Text>
-            </View>
+            </Pressable>
           ) : hasEnded && game.isAdmin ? (
             <PrimaryButton label="Enter Score" onPress={() => router.push(`/games/enter-score?gameId=${game.id}`)} />
           ) : hasEnded ? (

@@ -290,10 +290,12 @@ export type MotmBallotRow = {
   my_vote_user_id: string | null;
   motm_user_id: string | null;
   motm_name: string | null;
+  vote_total: number | null;
   candidate_user_id: string | null;
   candidate_name: string | null;
   candidate_avatar_url: string | null;
   candidate_mmr: number | null;
+  candidate_vote_count: number | null;
 };
 
 export type GroupPendingInviteRow = {

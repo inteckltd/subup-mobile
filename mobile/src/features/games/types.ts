@@ -61,6 +61,8 @@ export type MotmCandidateModel = {
   name: string;
   avatarUrl: string | null;
   mmr: number;
+  /** Present only after MOTM close. Null while voting is open. */
+  voteCount: number | null;
 };
 
 export type MotmBallotModel = {
@@ -73,6 +75,8 @@ export type MotmBallotModel = {
   myVoteUserId: string | null;
   motmUserId: string | null;
   motmName: string | null;
+  /** Present only after MOTM close. Null while voting is open. */
+  voteTotal: number | null;
   candidates: MotmCandidateModel[];
 };
 

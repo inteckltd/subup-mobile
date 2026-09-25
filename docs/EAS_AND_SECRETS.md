@@ -64,6 +64,7 @@ supabase functions deploy delete-my-account
 supabase functions deploy apply-game-lock
 supabase functions deploy close-motm-votes
 supabase functions deploy send-score-reminders
+supabase functions deploy send-lock-reminders
 supabase functions deploy create-connect-account-link
 supabase functions deploy create-join-payment
 supabase functions deploy leave-paid-game
@@ -108,6 +109,10 @@ select vault.create_secret(
 select vault.create_secret(
   'https://<project-ref>.functions.supabase.co/apply-game-lock',
   'apply_game_lock_function_url'
+);
+select vault.create_secret(
+  'https://<project-ref>.functions.supabase.co/send-lock-reminders',
+  'lock_reminder_function_url'
 );
 ```
 
