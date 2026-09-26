@@ -163,6 +163,7 @@ export type TeamDragController = ReturnType<typeof useTeamDrag>;
 
 function PlayerList({
   players,
+  motmUserId,
   dragTeam,
   draggingId,
   canDrag,
@@ -171,6 +172,7 @@ function PlayerList({
   onDragEnd,
 }: {
   players: GamePlayerModel[];
+  motmUserId?: string | null;
   dragTeam?: TeamId;
   draggingId?: string | null;
   canDrag: boolean;
@@ -187,6 +189,7 @@ function PlayerList({
           <PlayerLobbyRow
             player={player}
             showDivider={index > 0}
+            isMotm={!!motmUserId && player.userId === motmUserId}
             dragTeam={canDrag ? dragTeam : undefined}
             onDragBegin={canDrag ? onDragBegin : undefined}
             onDragMove={canDrag ? onDragMove : undefined}
@@ -204,12 +207,14 @@ function TeamDropZone({
   team,
   highlighted,
   drag,
+  motmUserId,
 }: {
   color: TeamColor;
   players: GamePlayerModel[];
   team: TeamId;
   highlighted: boolean;
   drag: TeamDragController;
+  motmUserId?: string | null;
 }) {
   const empty = players.length === 0;
 
@@ -254,6 +259,7 @@ function TeamDropZone({
       ) : (
         <PlayerList
           players={players}
+          motmUserId={motmUserId}
           dragTeam={team}
           draggingId={drag.active?.player.id}
           canDrag={drag.canDrag}
@@ -272,12 +278,14 @@ export function TeamBoard({
   homePlayers,
   awayPlayers,
   drag,
+  motmUserId,
 }: {
   homeColor: TeamColor;
   awayColor: TeamColor;
   homePlayers: GamePlayerModel[];
   awayPlayers: GamePlayerModel[];
   drag: TeamDragController;
+  motmUserId?: string | null;
 }) {
   return (
     <View className="w-full gap-4">
@@ -295,6 +303,7 @@ export function TeamBoard({
         team="home"
         highlighted={drag.hover === 'home'}
         drag={drag}
+        motmUserId={motmUserId}
       />
       <TeamDropZone
         color={awayColor}
@@ -302,6 +311,7 @@ export function TeamBoard({
         team="away"
         highlighted={drag.hover === 'away'}
         drag={drag}
+        motmUserId={motmUserId}
       />
     </View>
   );

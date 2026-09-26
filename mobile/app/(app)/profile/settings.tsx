@@ -3,11 +3,13 @@ import Constants from 'expo-constants';
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Linking, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
 import { deleteMyAccount } from '../../../src/features/profile/api';
+import { currentAppVersion, storeListingUrl } from '../../../src/features/updates/api';
+import { useStoreUpdateAvailable } from '../../../src/features/updates/hooks';
 import { clearDiagnosticErrors, getDiagnosticErrors } from '../../../src/lib/diagnostics';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { useConnectivity } from '../../../src/providers/ConnectivityProvider';
@@ -17,7 +19,7 @@ const VERSION_TAP_WINDOW_MS = 2000;
 const VERSION_TAP_COUNT = 7;
 
 function appVersion(): string {
-  return Constants.expoConfig?.version ?? Constants.nativeAppVersion ?? '1.0.0';
+  return currentAppVersion();
 }
 
 function appBuild(): string {
@@ -60,6 +62,8 @@ export default function SettingsScreen() {
 
   const version = appVersion();
   const build = appBuild();
+  const storeUpdateAvailable = useStoreUpdateAvailable();
+  const storeName = Platform.OS === 'ios' ? 'the App Store' : 'Google Play';
 
   function onTapVersion() {
     taps.current += 1;
@@ -149,6 +153,13 @@ export default function SettingsScreen() {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 48, gap: 12 }}>
+        {storeUpdateAvailable ? (
+          <Row
+            label="Update available"
+            subtitle={`A newer version is on ${storeName}`}
+            onPress={() => void Linking.openURL(storeListingUrl())}
+          />
+        ) : null}
         <Pressable onPress={onTapVersion} className="rounded-2xl border border-border bg-white px-4 py-4">
           <Text className="font-sans-bold text-[10px] uppercase tracking-wide text-muted">App version</Text>
           <Text className="pt-1 font-sans-bold text-base text-ink">

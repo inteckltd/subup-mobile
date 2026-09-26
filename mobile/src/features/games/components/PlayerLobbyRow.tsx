@@ -44,6 +44,8 @@ export type PlayerLayout = { x: number; y: number; width: number; height: number
 type PlayerLobbyRowProps = {
   player: GamePlayerModel;
   showDivider?: boolean;
+  /** Trophy chip after MOTM close — sits next to the MMR delta. */
+  isMotm?: boolean;
   onPress?: () => void;
   /** Standalone lifted card used while dragging. */
   elevated?: boolean;
@@ -64,6 +66,7 @@ type PlayerLobbyRowProps = {
 export function PlayerLobbyRow({
   player,
   showDivider = false,
+  isMotm = false,
   onPress,
   elevated = false,
   dragTeam,
@@ -122,6 +125,14 @@ export function PlayerLobbyRow({
         </View>
       </View>
       <View className="flex-row items-center gap-1.5">
+        {isMotm ? (
+          <View className="flex-row items-center gap-1 rounded px-2 py-1" style={{ backgroundColor: 'rgba(242,193,78,0.18)' }}>
+            <Ionicons name="trophy" size={12} color={colors.gold} />
+            <Text className="font-sans-bold text-[10px] uppercase tracking-wide" style={{ color: '#B45309' }}>
+              MOTM
+            </Text>
+          </View>
+        ) : null}
         {player.isWaitlisted ? (
           <View className="rounded px-2 py-1 bg-[#FEF3C7]">
             <Text className="font-sans-bold text-[10px] uppercase tracking-wide text-[#B45309]">Waitlist</Text>

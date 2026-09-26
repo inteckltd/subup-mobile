@@ -7,6 +7,7 @@ import { BrandLogo } from '../../../theme/BrandLogo';
 import { colors } from '../../../theme/tokens';
 import type { Profile } from '../../../types';
 import { useUnreadNotificationCount } from '../../notifications/hooks';
+import { useStoreUpdateAvailable } from '../../updates/hooks';
 import { Avatar } from './Avatar';
 
 type HomeHeaderProps = {
@@ -36,6 +37,7 @@ export function HomeHeader({
 }: HomeHeaderProps) {
   const insets = useSafeAreaInsets();
   const unreadCount = useUnreadNotificationCount();
+  const storeUpdateAvailable = useStoreUpdateAvailable();
   const firstName = profile?.full_name?.trim().split(' ')[0] || 'there';
   const unreadLabel = unreadCount > 9 ? '9+' : String(unreadCount);
 
@@ -71,15 +73,24 @@ export function HomeHeader({
             ) : null}
           </View>
           {onPressSettings ? (
-            <Pressable
-              onPress={onPressSettings}
-              hitSlop={8}
-              accessibilityLabel="Settings"
-              className="h-10 w-10 items-center justify-center overflow-hidden rounded-full"
-            >
-              <BlurView intensity={30} tint="light" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
-              <Ionicons name="settings-outline" size={18} color={colors.white} />
-            </Pressable>
+            <View>
+              <Pressable
+                onPress={onPressSettings}
+                hitSlop={8}
+                accessibilityLabel={storeUpdateAvailable ? 'Settings, update available' : 'Settings'}
+                className="h-10 w-10 items-center justify-center overflow-hidden rounded-full"
+              >
+                <BlurView intensity={30} tint="light" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+                <Ionicons name="settings-outline" size={18} color={colors.white} />
+              </Pressable>
+              {storeUpdateAvailable ? (
+                <View
+                  pointerEvents="none"
+                  accessibilityElementsHidden
+                  className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-danger"
+                />
+              ) : null}
+            </View>
           ) : null}
           {onPressSmallAvatar ? (
             <Pressable onPress={onPressSmallAvatar} hitSlop={4} accessibilityLabel="Open profile">

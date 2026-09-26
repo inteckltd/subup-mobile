@@ -35,14 +35,19 @@ function useNow(intervalMs = 1000) {
   return now;
 }
 
-function PlayerList({ players }: { players: GamePlayerModel[] }) {
+function PlayerList({ players, motmUserId }: { players: GamePlayerModel[]; motmUserId?: string | null }) {
   return (
     <View
       className="w-full overflow-hidden rounded-3xl border border-[#F9FAFB] bg-white"
       style={{ shadowColor: '#000000', shadowOpacity: 0.02, shadowRadius: 24, shadowOffset: { width: 0, height: 4 } }}
     >
       {players.map((player, index) => (
-        <PlayerLobbyRow key={player.id} player={player} showDivider={index > 0} />
+        <PlayerLobbyRow
+          key={player.id}
+          player={player}
+          showDivider={index > 0}
+          isMotm={!!motmUserId && player.userId === motmUserId}
+        />
       ))}
     </View>
   );
@@ -383,10 +388,17 @@ export default function GameDetailsScreen() {
               </View>
             </View>
             {game.scoreNotes ? <Text className="font-sans text-sm text-muted">{game.scoreNotes}</Text> : null}
-            {game.motmName ? (
-              <Pressable onPress={() => router.push(`/games/motm?gameId=${game.id}`)}>
-                <Text className="pt-2 text-center font-sans-bold text-sm text-primary">MOTM: {game.motmName}</Text>
+            {game.motmClosedAt ? (
+              <Pressable onPress={() => router.push(`/games/motm?gameId=${game.id}`)} className="items-center gap-0.5 pt-2">
+                {game.motmName ? (
+                  <Text className="text-center font-sans-bold text-sm text-primary">MOTM: {game.motmName}</Text>
+                ) : (
+                  <Text className="text-center font-sans-bold text-sm text-muted">No MOTM this game</Text>
+                )}
+                <Text className="font-sans-bold text-xs text-primary">See votes</Text>
               </Pressable>
+            ) : game.motmName ? (
+              <Text className="pt-2 text-center font-sans-bold text-sm text-primary">MOTM: {game.motmName}</Text>
             ) : null}
           </View>
         ) : null}
@@ -426,11 +438,12 @@ export default function GameDetailsScreen() {
                 homePlayers={homePlayers}
                 awayPlayers={awayPlayers}
                 drag={drag}
+                motmUserId={game.motmUserId}
               />
               {unassignedPlayers.length > 0 ? (
                 <View className="w-full gap-2">
                   <Text className="px-1 font-sans-bold text-lg text-ink">Unassigned</Text>
-                  <PlayerList players={unassignedPlayers} />
+                  <PlayerList players={unassignedPlayers} motmUserId={game.motmUserId} />
                 </View>
               ) : null}
               {waitlistedPlayers.length > 0 ? (
@@ -449,7 +462,7 @@ export default function GameDetailsScreen() {
               {players.length === 0 ? (
                 <EmptyState icon="people-outline" title="No one's joined yet" subtitle="Players who join this game will show up here." />
               ) : (
-                <PlayerList players={players} />
+                <PlayerList players={players} motmUserId={game.motmUserId} />
               )}
             </>
           )}
@@ -460,7 +473,7 @@ export default function GameDetailsScreen() {
         ) : null}
       </ScrollView>
 
-      {!isFinished || motmOpen || (isCompleted && game.hasJoined && !game.isWaitlisted) ? (
+      {!isFinished || isCompleted ? (
         <View
           className="absolute bottom-0 left-0 right-0 border-t border-border bg-white px-4 pt-4"
           style={{ paddingBottom: Math.max(insets.bottom, 24) }}
@@ -473,22 +486,17 @@ export default function GameDetailsScreen() {
               variant="outline"
               onPress={() => router.push(`/games/motm?gameId=${game.id}`)}
             />
-          ) : isCompleted && game.motmName ? (
-            <Pressable
+          ) : isCompleted && game.motmClosedAt ? (
+            <PrimaryButton
+              label="See MOTM votes"
+              variant="outline"
               onPress={() => router.push(`/games/motm?gameId=${game.id}`)}
-              className="w-full flex-row items-center justify-center gap-1.5 rounded-control bg-background py-4"
-            >
-              <Ionicons name="trophy" size={14} color={colors.primary} />
-              <Text className="font-sans-bold text-sm text-ink">MOTM: {game.motmName}</Text>
-            </Pressable>
+            />
           ) : isCompleted ? (
-            <Pressable
-              onPress={() => router.push(`/games/motm?gameId=${game.id}`)}
-              className="w-full flex-row items-center justify-center gap-1.5 rounded-control bg-background py-4"
-            >
+            <View className="w-full flex-row items-center justify-center gap-1.5 rounded-control bg-background py-4">
               <Ionicons name="hourglass-outline" size={14} color={colors.muted} />
-              <Text className="font-sans-bold text-sm text-muted">MOTM voting closed</Text>
-            </Pressable>
+              <Text className="font-sans-bold text-sm text-muted">MOTM voting in progress</Text>
+            </View>
           ) : hasEnded && game.isAdmin ? (
             <PrimaryButton label="Enter Score" onPress={() => router.push(`/games/enter-score?gameId=${game.id}`)} />
           ) : hasEnded ? (
