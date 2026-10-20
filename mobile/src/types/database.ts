@@ -15,7 +15,7 @@ export type GameStatus = 'draft' | 'open' | 'full' | 'cancelled' | 'completed';
 
 export type PaymentStatus = 'unpaid' | 'pending' | 'paid' | 'cash' | 'waived' | 'refunded';
 
-export type LockHours = 24 | 48 | 72;
+export type LockHours = 12 | 24 | 48 | 72;
 
 export type NotificationType =
   | 'group_invite'
@@ -184,15 +184,42 @@ export type GroupGameRow = UpcomingGameRow & {
   preview_players: GamePreviewPlayer[];
 };
 
-/** Raw row shape returned by `get_group_members()` — see 022_security_hardening.sql. */
+/** Raw row shape returned by `get_group_members()` — see 037_group_mmr_and_join_questions.sql. */
 export type GroupMemberRow = {
   id: string;
   user_id: string;
   full_name: string | null;
   avatar_url: string | null;
-  global_mmr: number;
+  mmr: number;
+  rated_games: number;
   role: GroupMemberRole;
   joined_at: string;
+};
+
+/** Raw row shape returned by `get_my_group_ratings()` — see 037_group_mmr_and_join_questions.sql. */
+export type GroupRatingRow = {
+  group_id: string;
+  group_name: string;
+  sport: SportType;
+  mmr: number;
+  rated_games: number;
+};
+
+/** Raw row shape returned by `get_my_membership_answers()` — see 037_group_mmr_and_join_questions.sql. */
+export type MembershipAnswersRow = {
+  sport: SportType;
+  needs_answers: boolean;
+  answers_locked: boolean;
+  attack_score: number | null;
+  fitness_score: number | null;
+  standard_score: number | null;
+};
+
+/** Raw row shape returned by `get_group_invite_preview()` — see 037_group_mmr_and_join_questions.sql. */
+export type GroupInvitePreviewRow = {
+  group_id: string;
+  group_name: string;
+  sport: SportType;
 };
 
 /**
@@ -210,7 +237,7 @@ export type CreatableGroupRow = {
     default_weekday: number | null;
     /** Postgres `time` column, serialised as `"HH:MM:SS"` over PostgREST. */
     default_time: string | null;
-    lock_hours: 24 | 48 | 72;
+    lock_hours: LockHours;
   } | null;
 };
 
@@ -321,7 +348,6 @@ export type GroupHistoryRow = {
 export type ProfileStatsRow = {
   games_played: number;
   motm_count: number;
-  global_mmr: number;
   win_rate: number | null;
 };
 
@@ -341,7 +367,7 @@ export type RecentGameRow = {
   team: 'home' | 'away' | null;
 };
 
-/** Raw row shape returned by `get_game_lobby_players()` — see 022_security_hardening.sql. */
+/** Raw row shape returned by `get_game_lobby_players()` — see 037_group_mmr_and_join_questions.sql. */
 export type GamePlayerRow = {
   id: string;
   user_id: string | null;
@@ -351,7 +377,8 @@ export type GamePlayerRow = {
   team: 'home' | 'away' | null;
   full_name: string | null;
   avatar_url: string | null;
-  global_mmr: number | null;
+  mmr: number | null;
+  rated_games: number | null;
 };
 
 export type MmrEventRow = {

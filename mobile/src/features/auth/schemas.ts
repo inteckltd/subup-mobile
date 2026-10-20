@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 import { isValidUkMobile } from '../../lib/phone';
 
-export const TERMS_VERSION = '1.6';
-export const PRIVACY_VERSION = '1.4';
+export const TERMS_VERSION = '1.7';
+export const PRIVACY_VERSION = '1.5';
 
 const ukMobile = z
   .string()

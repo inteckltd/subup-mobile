@@ -1,6 +1,7 @@
 import { Text, Pressable, View } from 'react-native';
 
 import { Avatar } from '../../home/components/Avatar';
+import { reliabilityLabel } from '../../ratings/format';
 import type { GroupMemberModel } from '../types';
 
 type MemberCardProps = {
@@ -35,7 +36,10 @@ export function MemberCard({ member, showRoleBadge = false, fillRow = false, onP
             </View>
           ) : null}
         </View>
-        <Text className="font-sans text-xs text-muted">{member.mmr} MMR</Text>
+        <Text className="font-sans text-xs text-muted">{member.mmr.toLocaleString('en-GB')} MMR</Text>
+        <Text className="font-sans text-[10px] text-muted" numberOfLines={1}>
+          {reliabilityLabel(member.ratedGames)}
+        </Text>
       </View>
     </>
   );

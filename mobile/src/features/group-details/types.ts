@@ -32,7 +32,9 @@ export type GroupMemberModel = {
   userId: string;
   name: string;
   avatarUrl: string | null;
+  /** This group's rating, not a global one. */
   mmr: number;
+  ratedGames: number;
   role: GroupMemberRole;
   joinedAt: string;
 };

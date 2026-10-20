@@ -3,6 +3,7 @@ import { useRef } from 'react';
 import { PanResponder, Pressable, Text, View } from 'react-native';
 
 import { Avatar } from '../../home/components/Avatar';
+import { formatGroupRating } from '../../ratings/format';
 import { colors } from '../../../theme/tokens';
 import type { GamePlayerModel } from '../types';
 
@@ -121,7 +122,7 @@ export function PlayerLobbyRow({
           <Text className="font-sans-bold text-sm text-ink" numberOfLines={1}>
             {player.name}
           </Text>
-          <Text className="font-sans text-[10px] text-muted">MMR {player.mmr}</Text>
+          <Text className="font-sans text-[10px] text-muted">{formatGroupRating(player.mmr, player.ratedGames)}</Text>
         </View>
       </View>
       <View className="flex-row items-center gap-1.5">

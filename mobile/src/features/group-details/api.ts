@@ -50,7 +50,8 @@ function mapGroupMember(row: GroupMemberRow): GroupMemberModel {
     userId: row.user_id,
     name: row.full_name ?? 'Unknown player',
     avatarUrl: row.avatar_url,
-    mmr: row.global_mmr ?? 1000,
+    mmr: row.mmr ?? 1000,
+    ratedGames: row.rated_games ?? 0,
     role: row.role,
     joinedAt: row.joined_at,
   };

@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, Text, View } from 'react-native';
 
 import { colors } from '../../../theme/tokens';
+import { RatingPill } from '../../ratings/components/RatingPill';
 import { sportIcon } from '../sportIcon';
 import type { GroupCardModel } from '../types';
 
@@ -9,10 +10,12 @@ type GroupCardProps = {
   group: GroupCardModel;
   /** Alternates the icon tint like the Figma reference (accent / neutral / accent...). Purely decorative. */
   tintIndex: number;
+  /** The caller's rating in this group. The pill is hidden until it has loaded. */
+  mmr?: number | null;
   onPress: () => void;
 };
 
-export function GroupCard({ group, tintIndex, onPress }: GroupCardProps) {
+export function GroupCard({ group, tintIndex, mmr, onPress }: GroupCardProps) {
   const isAccentTint = tintIndex % 2 === 0;
 
   return (
@@ -34,6 +37,7 @@ export function GroupCard({ group, tintIndex, onPress }: GroupCardProps) {
           {group.memberCount} {group.memberCount === 1 ? 'member' : 'members'}
         </Text>
       </View>
+      {mmr != null ? <RatingPill mmr={mmr} /> : null}
       <Ionicons name="chevron-forward" size={14} color={colors.muted} />
     </Pressable>
   );

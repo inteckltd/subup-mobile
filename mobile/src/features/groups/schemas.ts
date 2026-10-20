@@ -19,6 +19,7 @@ export const WEEKDAYS = [
 ] as const;
 
 export const LOCK_HOURS_OPTIONS: { value: LockHours; label: string }[] = [
+  { value: 12, label: '12h' },
   { value: 24, label: '24h' },
   { value: 48, label: '48h' },
   { value: 72, label: '72h' },
@@ -40,7 +41,7 @@ export const createGroupSchema = z.object({
   description: z.string().trim().max(500, 'Keep it under 500 characters').optional(),
   coverImageUri: z.string().optional(),
   sport: z.enum(['football', 'rugby', 'padel', 'basketball', 'netball', 'cricket', 'hockey', 'other']),
-  lockHours: z.union([z.literal(24), z.literal(48), z.literal(72)]),
+  lockHours: z.union([z.literal(12), z.literal(24), z.literal(48), z.literal(72)]),
   venueName: z.string().trim().min(1, 'Enter a venue name'),
   venueAddress: z.string().trim().min(1, 'Enter a venue address'),
   weekday: z.number().min(0).max(6),

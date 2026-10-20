@@ -3,8 +3,15 @@ import type { SportType } from '../../types/database';
 export type ProfileStatsModel = {
   gamesPlayed: number;
   motmCount: number;
-  globalMmr: number;
   winRate: number | null;
+};
+
+export type GroupRatingModel = {
+  groupId: string;
+  groupName: string;
+  sport: SportType;
+  mmr: number;
+  ratedGames: number;
 };
 
 export type SportBreakdownModel = {

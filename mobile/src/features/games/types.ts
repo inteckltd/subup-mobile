@@ -1,4 +1,4 @@
-import type { GameStatus, PaymentStatus } from '../../types/database';
+import type { GameStatus, LockHours, PaymentStatus } from '../../types/database';
 
 export type CreatableGroupModel = {
   id: string;
@@ -9,7 +9,7 @@ export type CreatableGroupModel = {
   defaultWeekday: number | null;
   defaultHour: number | null;
   defaultMinute: number | null;
-  lockHours: 24 | 48 | 72;
+  lockHours: LockHours;
 };
 
 export type GameDetailModel = {
@@ -85,7 +85,9 @@ export type GamePlayerModel = {
   userId: string | null;
   name: string;
   avatarUrl: string | null;
+  /** Rating in this game's group. */
   mmr: number;
+  ratedGames: number;
   /** Net MMR change for this game after MOTM close. Null while voting is still open. */
   mmrDelta: number | null;
   paymentStatus: PaymentStatus;

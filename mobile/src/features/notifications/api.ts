@@ -13,6 +13,8 @@ const KNOWN = [
   'This invite is not for you',
   'This invite is no longer pending',
   'Invite not found',
+  'Answer all three questions',
+  'Answers must be between 0 and 10',
   'Too many attempts',
 ];
 
@@ -55,8 +57,18 @@ export async function deleteNotification(id: string): Promise<{ error?: string }
   return {};
 }
 
-export async function acceptGroupInvite(inviteId: string): Promise<{ error?: string }> {
-  const { error } = await supabase.rpc('accept_group_invite', { p_invite_id: inviteId });
+/**
+ * Joins the group. For football groups pass the three join answers: they are
+ * stored locked on the new membership in the same transaction.
+ */
+export async function acceptGroupInvite(
+  inviteId: string,
+  answers?: { attack: number; fitness: number; standard: number },
+): Promise<{ error?: string }> {
+  const { error } = await supabase.rpc('accept_group_invite', {
+    p_invite_id: inviteId,
+    ...(answers ? { p_attack: answers.attack, p_fitness: answers.fitness, p_standard: answers.standard } : {}),
+  });
   if (error) return { error: friendlyError(error) };
   return {};
 }

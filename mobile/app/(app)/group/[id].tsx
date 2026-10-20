@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -33,6 +33,7 @@ import { EmptyState } from '../../../src/features/home/components/EmptyState';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { SectionHeader } from '../../../src/features/home/components/SectionHeader';
 import { GroupGameCardSkeleton, MemberCardSkeleton } from '../../../src/features/home/components/Skeleton';
+import { useMembershipAnswers } from '../../../src/features/join-questions/hooks';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
 
@@ -68,6 +69,16 @@ export default function GroupDetailsScreen() {
   const invitesQuery = useGroupPendingInvites(id);
   const historyQuery = useGroupHistory(id);
   const { refreshing, refresh } = useGroupDetailRefresh(id);
+  const answersQuery = useMembershipAnswers(id);
+  const answersPromptedRef = useRef(false);
+
+  // A membership with no join answers yet (e.g. a group the caller just
+  // created) is asked once per visit. Backing out never blocks the group.
+  useEffect(() => {
+    if (answersPromptedRef.current || !id || !answersQuery.data?.needsAnswers) return;
+    answersPromptedRef.current = true;
+    router.push(`/group/join-questions?groupId=${id}`);
+  }, [id, answersQuery.data]);
 
   if (groupQuery.isPending) {
     return (

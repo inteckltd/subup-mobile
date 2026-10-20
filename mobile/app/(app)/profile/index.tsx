@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { SPORT_OPTIONS } from '../../../src/features/groups/schemas';
 import { AvatarLightbox } from '../../../src/features/home/components/AvatarLightbox';
@@ -11,8 +11,10 @@ import { EmptyState } from '../../../src/features/home/components/EmptyState';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { HomeHeader } from '../../../src/features/home/components/HomeHeader';
 import { sportIcon } from '../../../src/features/home/sportIcon';
-import { useMyProfileStats, useMyRecentGames, useMySportBreakdown } from '../../../src/features/profile/hooks';
+import { useMyGroupRatings, useMyProfileStats, useMyRecentGames, useMySportBreakdown } from '../../../src/features/profile/hooks';
 import type { FormResult } from '../../../src/features/profile/types';
+import { RatingPill } from '../../../src/features/ratings/components/RatingPill';
+import { reliabilityLabel } from '../../../src/features/ratings/format';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
 
@@ -31,17 +33,21 @@ export default function ProfileScreen() {
   const statsQuery = useMyProfileStats();
   const sportsQuery = useMySportBreakdown();
   const recentQuery = useMyRecentGames();
+  const ratingsQuery = useMyGroupRatings();
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
-  const refreshing = statsQuery.isRefetching || sportsQuery.isRefetching || recentQuery.isRefetching;
+  const refreshing =
+    statsQuery.isRefetching || sportsQuery.isRefetching || recentQuery.isRefetching || ratingsQuery.isRefetching;
   const refresh = () => {
     void statsQuery.refetch();
     void sportsQuery.refetch();
     void recentQuery.refetch();
+    void ratingsQuery.refetch();
   };
 
   const stats = statsQuery.data;
   const sports = sportsQuery.data ?? [];
+  const ratings = ratingsQuery.data ?? [];
   const recent = recentQuery.data ?? [];
   const form = [...recent].reverse();
   const winRateLabel = stats?.winRate == null ? '—' : `${stats.winRate}%`;
@@ -131,10 +137,39 @@ export default function ProfileScreen() {
                     <Text className="font-sans-bold text-sm text-ink">{sportLabel(row.sport)}</Text>
                     <Text className="font-sans text-[10px] text-muted">{row.gamesPlayed} Games</Text>
                   </View>
-                  <Text className="font-sans-bold text-xs text-ink">
-                    MMR {(stats?.globalMmr ?? 1000).toLocaleString('en-GB')}
-                  </Text>
                 </View>
+              ))
+            )}
+          </View>
+
+          <View className="gap-3">
+            <Text className="font-sans-bold text-sm text-ink">Group Ratings</Text>
+            {ratingsQuery.isPending ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : ratingsQuery.isError ? (
+              <ErrorState message="Couldn't load your group ratings." onRetry={() => ratingsQuery.refetch()} />
+            ) : ratings.length === 0 ? (
+              <EmptyState icon="people-outline" title="No groups yet" subtitle="Join a group to get a rating there." />
+            ) : (
+              ratings.map((row) => (
+                <Pressable
+                  key={row.groupId}
+                  onPress={() => router.push(`/group/${row.groupId}`)}
+                  className="flex-row items-center gap-4 rounded-2xl border border-border bg-white p-4"
+                >
+                  <View className="h-12 w-12 items-center justify-center rounded-xl bg-accent/20">
+                    <Ionicons name={sportIcon(row.sport)} size={20} color={colors.primary} />
+                  </View>
+                  <View className="min-w-0 flex-1">
+                    <Text className="font-sans-bold text-sm text-ink" numberOfLines={1}>
+                      {row.groupName}
+                    </Text>
+                    <Text className="font-sans text-[10px] text-muted">
+                      {reliabilityLabel(row.ratedGames)} · {row.ratedGames} rated {row.ratedGames === 1 ? 'game' : 'games'}
+                    </Text>
+                  </View>
+                  <RatingPill mmr={row.mmr} />
+                </Pressable>
               ))
             )}
           </View>

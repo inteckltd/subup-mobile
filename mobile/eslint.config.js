@@ -13,6 +13,7 @@ module.exports = defineConfig([
     files: [
       "src/features/games/components/PlayerLobbyRow.tsx",
       "src/features/games/components/TeamBoard.tsx",
+      "src/features/join-questions/components/StepSlider.tsx",
     ],
     rules: {
       "react-hooks/refs": "off",

@@ -1,8 +1,8 @@
 import { recordDiagnosticError } from '../../lib/diagnostics';
 import { supabase } from '../../lib/supabase';
 import type { Profile } from '../../types';
-import type { ProfileStatsRow, RecentGameRow, SportBreakdownRow } from '../../types/database';
-import type { FormResult, ProfileStatsModel, RecentGameModel, SportBreakdownModel } from './types';
+import type { GroupRatingRow, ProfileStatsRow, RecentGameRow, SportBreakdownRow } from '../../types/database';
+import type { FormResult, GroupRatingModel, ProfileStatsModel, RecentGameModel, SportBreakdownModel } from './types';
 
 const GENERIC_ERROR = 'Something went wrong. Please try again.';
 
@@ -27,9 +27,20 @@ export async function fetchMyProfileStats(): Promise<ProfileStatsModel | null> {
   return {
     gamesPlayed: Number(row.games_played),
     motmCount: row.motm_count,
-    globalMmr: row.global_mmr,
     winRate: row.win_rate == null ? null : Number(row.win_rate),
   };
+}
+
+export async function fetchMyGroupRatings(): Promise<GroupRatingModel[]> {
+  const { data, error } = await supabase.rpc('get_my_group_ratings');
+  if (error) throw new Error(friendlyError(error, "Couldn't load your group ratings."));
+  return ((data ?? []) as GroupRatingRow[]).map((row) => ({
+    groupId: row.group_id,
+    groupName: row.group_name,
+    sport: row.sport,
+    mmr: row.mmr,
+    ratedGames: row.rated_games,
+  }));
 }
 
 export async function fetchMySportBreakdown(): Promise<SportBreakdownModel[]> {

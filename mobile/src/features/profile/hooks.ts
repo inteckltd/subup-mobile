@@ -1,7 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { useAuth } from '../../providers/AuthProvider';
-import { fetchMyProfileStats, fetchMyRecentGames, fetchMySportBreakdown } from './api';
+import { fetchMyGroupRatings, fetchMyProfileStats, fetchMyRecentGames, fetchMySportBreakdown } from './api';
+
+export function useMyGroupRatings() {
+  const { session } = useAuth();
+  return useQuery({
+    // Under 'home' so Home's focus refetch and pull-to-refresh keep ratings fresh.
+    queryKey: ['home', 'group-ratings', session?.user.id],
+    queryFn: fetchMyGroupRatings,
+    enabled: !!session,
+  });
+}
 
 export function useMyProfileStats() {
   const { session } = useAuth();

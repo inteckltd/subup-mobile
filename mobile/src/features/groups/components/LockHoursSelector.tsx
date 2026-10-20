@@ -8,7 +8,7 @@ type LockHoursSelectorProps = {
   onChange: (value: LockHours) => void;
 };
 
-/** Segmented 24h / 48h / 72h control for when games lock before kickoff. */
+/** Segmented 12h / 24h / 48h / 72h control for when games lock before kickoff. */
 export function LockHoursSelector({ value, onChange }: LockHoursSelectorProps) {
   return (
     <View className="w-full gap-2">

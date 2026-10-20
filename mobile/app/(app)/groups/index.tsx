@@ -11,6 +11,7 @@ import { GroupCard } from '../../../src/features/home/components/GroupCard';
 import { HomeHeader } from '../../../src/features/home/components/HomeHeader';
 import { GroupCardSkeleton } from '../../../src/features/home/components/Skeleton';
 import { useMyGroups } from '../../../src/features/home/hooks';
+import { useMyGroupRatings } from '../../../src/features/profile/hooks';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
 
@@ -18,6 +19,8 @@ export default function GroupsScreen() {
   const { profile } = useAuth();
   const groupsQuery = useMyGroups();
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const ratingsQuery = useMyGroupRatings();
+  const ratingByGroup = new Map((ratingsQuery.data ?? []).map((row) => [row.groupId, row.mmr]));
   const groups = groupsQuery.data ?? [];
 
   return (
@@ -59,6 +62,7 @@ export default function GroupsScreen() {
                 key={group.id}
                 group={group}
                 tintIndex={index}
+                mmr={ratingByGroup.get(group.id)}
                 onPress={() => router.push(`/group/${group.id}`)}
               />
             ))

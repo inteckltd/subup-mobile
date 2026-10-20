@@ -14,6 +14,7 @@ import { HomeHeader } from '../../src/features/home/components/HomeHeader';
 import { SectionHeader } from '../../src/features/home/components/SectionHeader';
 import { GameCardSkeleton, GroupCardSkeleton } from '../../src/features/home/components/Skeleton';
 import { useHasPendingInvites, useHomeRefresh, useMyGroups, useUpcomingGames } from '../../src/features/home/hooks';
+import { useMyGroupRatings } from '../../src/features/profile/hooks';
 import { SetupChecklist } from '../../src/features/onboarding/components/SetupChecklist';
 import { consumeExplainerPresentation, useOnboardingFlags } from '../../src/features/onboarding/hooks';
 import { getSetupProgress } from '../../src/features/onboarding/progress';
@@ -33,6 +34,9 @@ export default function HomeScreen() {
   const pendingInvitesQuery = useHasPendingInvites(adminGroupIds);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const skipHomeRefetchOnFirstFocus = useRef(true);
+
+  const ratingsQuery = useMyGroupRatings();
+  const ratingByGroup = new Map((ratingsQuery.data ?? []).map((row) => [row.groupId, row.mmr]));
 
   const groups = groupsQuery.data ?? [];
   const games = gamesQuery.data ?? [];
@@ -177,6 +181,7 @@ export default function HomeScreen() {
                     key={group.id}
                     group={group}
                     tintIndex={index}
+                    mmr={ratingByGroup.get(group.id)}
                     onPress={() => router.push(`/group/${group.id}`)}
                   />
                 ))}

@@ -27,13 +27,20 @@ export function TermsCopy() {
         Paid games are joined with Apple Pay, Google Pay, or card via Stripe. You pay the pitch cost the organiser set
         plus a SubUp service fee shown before you confirm (currently 10% of the pitch cost, minimum 50p; £0 for free
         games). The organiser (the group treasurer) receives the pitch amount through Stripe Connect; SubUp retains the
-        service fee. There is no cash or waived entry. Each group sets a lock window of 24, 48, or 72 hours before
+        service fee. There is no cash or waived entry. Each group sets a lock window of 12, 24, 48, or 72 hours before
         kickoff. If you leave before that window, the pitch is refunded; the SubUp service fee is not. After the
         lock window you cannot leave a confirmed spot. If a game is cancelled before kickoff — including automatic
         cancellation when too few paid players have joined — the pitch is refunded and the SubUp service fee is not.
         After kickoff the game cannot be cancelled and payments are not refunded. The treasurer is paid the pitch total
         after the game starts; that usually reaches their bank in around two business days. SubUp retains the service
         fee when you pay.
+      </Para>
+      <Para>
+        Ratings are kept separately for each group you join. When you join a group you answer a few short questions
+        about your playing style, fitness and the standard you have played at. Your standard answer sets your starting
+        rating in that group, and your answers are used to help balance teams. Answers cannot be edited once
+        submitted, and if you leave and rejoin a group you answer again and start a new rating. Team balancing is
+        automatic, is not guaranteed to be fair or even, and ratings are a guide only.
       </Para>
       <Para>
         We may suspend or delete accounts that abuse the service (for example spam invites, impersonation, or attempts
@@ -60,7 +67,8 @@ export function PrivacyCopy() {
       </Para>
       <Para>
         We process: your name, UK mobile number (your login), optional email, optional profile photo, group and game
-        activity, scores, votes, ratings, push tokens, payment records (status, amounts, Stripe identifiers), and
+        activity, scores, votes, per-group ratings, your answers to the join questions (playing style, fitness and standard
+        played, used to set your starting rating and balance teams), push tokens, payment records (status, amounts, Stripe identifiers), and
         device diagnostics if you enable error reporting. Legal bases: contract (to run your account, groups, and
         payments), legitimate interests (security, abuse prevention, product reliability), and legal obligation where we
         must keep records.
@@ -72,7 +80,7 @@ export function PrivacyCopy() {
         We do not sell your data. We do not store full card or bank account numbers.
       </Para>
       <Para>
-        Group members can see your name, photo, and rating — not your mobile or email — through the app. Group admins
+        Group members can see your name, photo, and that group's rating — not your mobile, email, or join-question answers — through the app. Group admins
         share a join link so you can join their group. You can delete your account in Settings; we remove memberships, upcoming
         spots, tokens, and your login. Past game history may show “Deleted user”.
       </Para>

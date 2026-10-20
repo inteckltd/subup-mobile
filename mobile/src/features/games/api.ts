@@ -99,7 +99,10 @@ function mapCreatableGroup(row: CreatableGroupRow): CreatableGroupModel | null {
     defaultWeekday: row.group.default_weekday,
     defaultHour: parseHour(row.group.default_time),
     defaultMinute: parseMinute(row.group.default_time),
-    lockHours: row.group.lock_hours === 48 || row.group.lock_hours === 72 ? row.group.lock_hours : 24,
+    lockHours:
+      row.group.lock_hours === 12 || row.group.lock_hours === 48 || row.group.lock_hours === 72
+        ? row.group.lock_hours
+        : 24,
   };
 }
 
@@ -156,7 +159,8 @@ function mapGamePlayer(row: GamePlayerRow, mmrDelta: number | null): GamePlayerM
     userId,
     name: row.full_name ?? (userId ? 'Unknown player' : 'Deleted user'),
     avatarUrl: row.avatar_url ?? null,
-    mmr: row.global_mmr ?? 1000,
+    mmr: row.mmr ?? 1000,
+    ratedGames: row.rated_games ?? 0,
     mmrDelta,
     paymentStatus: row.payment_status,
     isWaitlisted: row.is_waitlisted,

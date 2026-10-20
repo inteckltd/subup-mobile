@@ -11,6 +11,7 @@ import {
   isJoinToken,
   stashPendingJoinToken,
 } from '../../src/features/group-details/joinLink';
+import { beginInviteAcceptance } from '../../src/features/join-questions/api';
 import { acceptGroupInvite } from '../../src/features/notifications/api';
 import { useAuth } from '../../src/providers/AuthProvider';
 import { colors } from '../../src/theme/tokens';
@@ -98,10 +99,15 @@ export default function JoinGroupScreen() {
       setError("Couldn't open this invite.");
       return;
     }
-    const accepted = await acceptGroupInvite(claimed.claim.inviteId);
+    const start = await beginInviteAcceptance(claimed.claim.inviteId, acceptGroupInvite);
     setJoining(false);
-    if (accepted.error) {
-      setError(accepted.error);
+    if (start.kind === 'error') {
+      setError(start.error);
+      return;
+    }
+    if (start.kind === 'questions') {
+      // Nothing is saved until the questions screen succeeds; backing out keeps the invite pending.
+      router.push(`/group/join-questions?inviteId=${claimed.claim.inviteId}`);
       return;
     }
     router.replace(`/group/${claimed.claim.groupId}`);

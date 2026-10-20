@@ -1,7 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 
 import { useAuth } from '../../providers/AuthProvider';
+import { beginInviteAcceptance } from '../join-questions/api';
 import { acceptGroupInvite, declineGroupInvite, deleteNotification, fetchMyNotifications, markMyNotificationsRead } from './api';
 import type { NotificationModel } from './types';
 
@@ -91,10 +93,17 @@ export function useInviteActions() {
     async (inviteId: string) => {
       setError(null);
       setPending(true);
-      const result = await acceptGroupInvite(inviteId);
+      const start = await beginInviteAcceptance(inviteId, acceptGroupInvite);
       setPending(false);
-      if (result.error) {
-        setError(result.error);
+      if (start.kind === 'error') {
+        setError(start.error);
+        await invalidate();
+        return false;
+      }
+      if (start.kind === 'questions') {
+        // Nothing is saved until the questions screen succeeds; the invite and
+        // this notification stay put if the user backs out.
+        router.push(`/group/join-questions?inviteId=${inviteId}`);
         return false;
       }
       await invalidate();

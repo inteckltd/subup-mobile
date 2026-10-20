@@ -28,6 +28,7 @@ export default function AppLayout() {
       <Stack.Screen name="groups/index" />
       <Stack.Screen name="group/[id]" />
       <Stack.Screen name="group/invite" />
+      <Stack.Screen name="group/join-questions" />
       <Stack.Screen name="group/edit" />
       <Stack.Screen name="group/payouts" />
       <Stack.Screen name="games/index" />

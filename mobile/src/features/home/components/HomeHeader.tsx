@@ -21,8 +21,8 @@ type HomeHeaderProps = {
 };
 
 /**
- * The navy hero header — logo, notifications/profile chrome, greeting,
- * and MMR chip. The SubUp mark is not tappable. Small avatar goes to
+ * The navy hero header — logo, notifications/profile chrome and greeting.
+ * Ratings are per group, so there is no global MMR chip. The SubUp mark is not tappable. Small avatar goes to
  * Profile when `onPressSmallAvatar` is passed. Large avatar opens a photo
  * lightbox. Pass `onPressEdit` on Profile to show the pencil overlay.
  * Pass `onPressSettings` on Home, Games, and Profile for the gear.
@@ -119,13 +119,6 @@ export function HomeHeader({
           ) : null}
         </View>
         <Text className="font-sans-bold text-xl text-white">Hey, {firstName}!</Text>
-        <View className="overflow-hidden rounded-full border border-gold/30">
-          <BlurView intensity={20} tint="light" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
-          <View className="flex-row items-center gap-2 px-4 py-1.5">
-            <Ionicons name="shield-checkmark-outline" size={13} color={colors.gold} />
-            <Text className="font-sans-bold text-xs tracking-wide text-gold">MMR: {profile?.global_mmr ?? 1000}</Text>
-          </View>
-        </View>
       </View>
     </View>
   );
