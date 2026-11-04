@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 
 import { formatPriceField, parsePricePounds, sanitizePriceInput } from '../schemas';
@@ -11,12 +11,12 @@ type PriceFieldProps = {
 
 export function PriceField({ value, onChange, onBlur }: PriceFieldProps) {
   const [text, setText] = useState(() => formatPriceField(value));
+  const [prevValue, setPrevValue] = useState(value);
 
-  useEffect(() => {
-    if (parsePricePounds(text) !== value) {
-      setText(formatPriceField(value));
-    }
-  }, [value, text]);
+  if (prevValue !== value) {
+    setPrevValue(value);
+    setText(formatPriceField(value));
+  }
 
   return (
     <View className="w-full flex-row items-center rounded-xl bg-background px-4 py-3">

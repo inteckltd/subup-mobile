@@ -13,7 +13,10 @@
       "bundleIdentifier": "com.inteck.subup",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "LSApplicationQueriesSchemes": ["whatsapp", "whatsapp-business"]
+        "LSApplicationQueriesSchemes": [
+          "whatsapp",
+          "whatsapp-business"
+        ]
       }
     },
     "android": {
@@ -76,7 +79,8 @@
           "enableGooglePay": true
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "@sentry/react-native"
     ],
     "experiments": {
       "typedRoutes": true

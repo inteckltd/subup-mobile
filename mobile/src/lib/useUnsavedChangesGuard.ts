@@ -11,7 +11,10 @@ export function useUnsavedChangesGuard(isDirty: boolean) {
   const navigation = useNavigation();
   const allowLeaveRef = useRef(false);
   const isDirtyRef = useRef(isDirty);
-  isDirtyRef.current = isDirty;
+
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+  }, [isDirty]);
 
   const allowLeave = useCallback(() => {
     allowLeaveRef.current = true;
