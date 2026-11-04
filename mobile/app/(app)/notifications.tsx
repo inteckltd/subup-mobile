@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { ScrollView, Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,11 +25,16 @@ export default function NotificationsScreen() {
   const { remove, error: deleteError } = useDeleteNotification();
   const rows = query.data ?? [];
   const error = inviteError || deleteError;
-  const [newIds, setNewIds] = useState<Set<string> | null>(null);
+  const hasMarkedRef = useRef(false);
+
+  const newIds = useMemo(() => {
+    if (!query.data) return new Set<string>();
+    return new Set(query.data.filter((row) => !row.readAt).map((row) => row.id));
+  }, [query.data]);
 
   useEffect(() => {
-    if (query.isPending || query.isError || !query.data || newIds) return;
-    setNewIds(new Set(query.data.filter((row) => !row.readAt).map((row) => row.id)));
+    if (query.isPending || query.isError || !query.data || hasMarkedRef.current || newIds.size === 0) return;
+    hasMarkedRef.current = true;
     void markRead();
   }, [query.data, query.isPending, query.isError, markRead, newIds]);
 

@@ -80,7 +80,7 @@ export function PrivacyCopy() {
         We do not sell your data. We do not store full card or bank account numbers.
       </Para>
       <Para>
-        Group members can see your name, photo, and that group's rating — not your mobile, email, or join-question answers — through the app. Group admins
+        Group members can see your name, photo, and that group&apos;s rating — not your mobile, email, or join-question answers — through the app. Group admins
         share a join link so you can join their group. You can delete your account in Settings; we remove memberships, upcoming
         spots, tokens, and your login. Past game history may show “Deleted user”.
       </Para>

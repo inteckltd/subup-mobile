@@ -24,23 +24,19 @@ export default function JoinGroupScreen() {
 
   const [groupName, setGroupName] = useState<string | null>(null);
   const [groupId, setGroupId] = useState<string | null>(null);
-  const [invalid, setInvalid] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [invalid, setInvalid] = useState(() => !isJoinToken(token));
+  const [loading, setLoading] = useState(() => isJoinToken(token));
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isJoinToken(token)) {
-      setInvalid(true);
-      setLoading(false);
-      return;
-    }
+    if (invalid) return;
     if (!isFullyAuthed) {
       void stashPendingJoinToken(token);
     } else {
       void clearPendingJoinToken();
     }
-  }, [token, isFullyAuthed]);
+  }, [token, isFullyAuthed, invalid]);
 
   useEffect(() => {
     if (!isJoinToken(token)) return;
