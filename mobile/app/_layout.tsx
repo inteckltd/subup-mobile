@@ -22,12 +22,14 @@ import { peekPendingJoinToken } from '../src/features/group-details/joinLink';
 import { env } from '../src/lib/env';
 import { queryClient } from '../src/lib/queryClient';
 import { initSentry, Sentry } from '../src/lib/sentry';
+import { initializeMetaTracking } from '../src/lib/metaTracking';
 import { AuthProvider, useAuth } from '../src/providers/AuthProvider';
 import { ConnectivityProvider } from '../src/providers/ConnectivityProvider';
 import { colors } from '../src/theme/tokens';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 initSentry();
+initializeMetaTracking();
 
 function RootLayout() {
   const [fontsLoaded] = useFonts({

@@ -8,6 +8,8 @@ const envSchema = z.object({
   EXPO_PUBLIC_SENTRY_DSN: z.string().optional(),
   EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().optional(),
   EXPO_PUBLIC_INVITE_APP_URL: z.string().url({ message: 'EXPO_PUBLIC_INVITE_APP_URL must be a valid URL' }).optional(),
+  EXPO_PUBLIC_META_APP_ID: z.string().optional(),
+  EXPO_PUBLIC_META_CLIENT_TOKEN: z.string().optional(),
 });
 
 function loadEnv() {
@@ -17,6 +19,8 @@ function loadEnv() {
     EXPO_PUBLIC_SENTRY_DSN: process.env.EXPO_PUBLIC_SENTRY_DSN,
     EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY,
     EXPO_PUBLIC_INVITE_APP_URL: process.env.EXPO_PUBLIC_INVITE_APP_URL || undefined,
+    EXPO_PUBLIC_META_APP_ID: process.env.EXPO_PUBLIC_META_APP_ID,
+    EXPO_PUBLIC_META_CLIENT_TOKEN: process.env.EXPO_PUBLIC_META_CLIENT_TOKEN,
   });
 
   if (!parsed.success) {

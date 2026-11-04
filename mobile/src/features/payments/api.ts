@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { recordDiagnosticError } from '../../lib/diagnostics';
 import { supabase } from '../../lib/supabase';
+import { logMetaStandardEvent, MetaEvents } from '../../lib/metaTracking';
 import type { GroupPayoutsRow } from '../../types/database';
 import type { GroupPayoutsModel } from '../group-details/types';
 
@@ -207,6 +208,13 @@ export async function payToJoinGame(gameId: string): Promise<{ error?: string }>
       return { error: 'Payment cancelled' };
     }
     return { error: presented.error.message || 'Payment failed.' };
+  }
+
+  if (typeof data.amount === 'number') {
+    logMetaStandardEvent(MetaEvents.PURCHASED, data.amount / 100, {
+      currency: 'GBP',
+      content_type: 'game_join',
+    });
   }
 
   return {};

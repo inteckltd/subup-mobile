@@ -76,6 +76,20 @@
           "enableGooglePay": true
         }
       ],
+      [
+        "react-native-fbsdk-next",
+        {
+          "appID": "YOUR_META_APP_ID",
+          "clientToken": "YOUR_META_CLIENT_TOKEN",
+          "displayName": "SubUp",
+          "scheme": "fb",
+          "advertiserIDCollectionEnabled": true,
+          "autoLogAppEventsEnabled": true,
+          "isAutoInitEnabled": true,
+          "iosUserTrackingPermission": "SubUp uses this to measure ad performance and improve your experience."
+        }
+      ],
+      "expo-tracking-transparency",
       "expo-web-browser"
     ],
     "experiments": {
