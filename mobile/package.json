@@ -1,6 +1,6 @@
 {
   "name": "@pitchin/mobile",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo-google-fonts/manrope": "^0.4.3",
