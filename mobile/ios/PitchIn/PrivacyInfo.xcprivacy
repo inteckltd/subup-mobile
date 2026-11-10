@@ -28,18 +28,14 @@
 				<string>35F9.1</string>
 			</array>
 		</dict>
-		<dict>
-			<key>NSPrivacyAccessedAPIType</key>
-			<string>NSPrivacyAccessedAPICategoryUserIDFA</string>
-			<key>NSPrivacyAccessedAPITypeReasons</key>
-			<array>
-				<string>3B52.1</string>
-			</array>
-		</dict>
 	</array>
 	<key>NSPrivacyCollectedDataTypes</key>
 	<array/>
 	<key>NSPrivacyTracking</key>
 	<true/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array>
+		<string>ep1.facebook.com</string>
+	</array>
 </dict>
 </plist>

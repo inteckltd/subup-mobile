@@ -37,8 +37,9 @@ EXPO_PUBLIC_META_CLIENT_TOKEN=your_meta_client_token_here
 
 ### iOS Privacy Manifest
 The `ios/PitchIn/PrivacyInfo.xcprivacy` file has been updated to:
-- Include `NSPrivacyAccessedAPICategoryUserIDFA` with reason code `3B52.1` (app advertising)
-- Set `NSPrivacyTracking` to `true` (indicates the app tracks users)
+- Set `NSPrivacyTracking` to `true` (the app tracks users via the Meta SDK, gated by ATT)
+- List `ep1.facebook.com` in `NSPrivacyTrackingDomains` (matches the Facebook SDK's own manifests)
+- Do not add `NSPrivacyAccessedAPICategoryUserIDFA`. IDFA is not a Required Reason API; App Store Connect rejects it (ITMS-91054). IDFA access is covered by ATT and the App Privacy answers.
 
 ### App Tracking Transparency
 The app requests tracking permission on iOS using `expo-tracking-transparency`:
