@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "dev:mobile": "npm run start --workspace=mobile",
-    "lint:mobile": "npm run lint --workspace=mobile"
+    "lint:mobile": "npm run lint --workspace=mobile",
+    "eas-build-post-install": "node mobile/scripts/apply-meta-native-config.js"
   }
 }

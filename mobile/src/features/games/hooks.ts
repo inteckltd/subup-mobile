@@ -19,6 +19,7 @@ import {
 import { payToJoinGame } from '../payments/api';
 import type { CreateGameFormValues } from './schemas';
 import type { GamePlayerModel } from './types';
+import { logMetaEvent, MetaEvents } from '../../lib/metaTracking';
 
 /**
  * Query keys include the signed-in user's id (same reasoning as
@@ -195,6 +196,7 @@ export function useJoinLeaveGame(gameId: string | undefined) {
       setError(result.error);
       return;
     }
+    logMetaEvent(MetaEvents.PLAYER_JOINED_GAME, { game_id: gameId });
     await refetchGame();
   }, [gameId, refetchGame]);
 
@@ -209,6 +211,7 @@ export function useJoinLeaveGame(gameId: string | undefined) {
       await refetchGame();
       return;
     }
+    logMetaEvent(MetaEvents.PLAYER_JOINED_GAME, { game_id: gameId, paid: 'true' });
     await refetchGame();
   }, [gameId, refetchGame]);
 

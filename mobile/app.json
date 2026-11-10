@@ -16,7 +16,8 @@
         "LSApplicationQueriesSchemes": [
           "whatsapp",
           "whatsapp-business"
-        ]
+        ],
+        "NSUserTrackingUsageDescription": "SubUp uses this to measure ad performance and improve your experience."
       }
     },
     "android": {

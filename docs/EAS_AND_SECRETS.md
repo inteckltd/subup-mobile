@@ -27,6 +27,8 @@ EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 EXPO_PUBLIC_SENTRY_DSN
 EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY
 EXPO_PUBLIC_INVITE_APP_URL   # landing URL for invite SMS; WhatsApp/Messages use store listings
+EXPO_PUBLIC_META_APP_ID      # Meta app 1687468766300717; required for production builds
+EXPO_PUBLIC_META_CLIENT_TOKEN # Meta client token; required for production builds
 SENTRY_AUTH_TOKEN          # source maps via the Sentry Expo plugin
 ```
 

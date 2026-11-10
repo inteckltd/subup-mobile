@@ -19,6 +19,7 @@ import { LockHoursSelector } from '../../src/features/groups/components/LockHour
 import { Stepper } from '../../src/features/groups/components/Stepper';
 import { WeekdaySelector } from '../../src/features/groups/components/WeekdaySelector';
 import { CreateGroupFormValues, createGroupDefaultValues, createGroupSchema } from '../../src/features/groups/schemas';
+import { logMetaEvent, MetaEvents } from '../../src/lib/metaTracking';
 import {
   type ConnectStatus,
   connectAccountReady,
@@ -97,6 +98,8 @@ export default function CreateGroupScreen() {
       setSubmitError(error ?? 'Something went wrong. Please try again.');
       return;
     }
+
+    logMetaEvent(MetaEvents.GROUP_CREATED, { group_id: id });
 
     // Keeps Home's group list (and any other cached my-groups reads) in sync
     // with the row this screen just inserted — same query key useMyGroups uses.
