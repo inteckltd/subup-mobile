@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -281,16 +280,9 @@ export default function GroupDetailsScreen() {
                       <GroupGameCard
                         key={game.id}
                         game={game}
-                        lockHours={group.lockHours}
                         onPress={() => router.push(`/games/${game.id}`)}
-                        onPressJoin={() => router.push(`/games/${game.id}`)}
-                        onPressLeave={() => router.push(`/games/${game.id}`)}
                       />
                     ))}
-                    <View className="items-center gap-2 rounded-2xl border border-dashed border-border bg-white/60 px-6 py-8">
-                      <Ionicons name="calendar-outline" size={20} color={colors.muted} />
-                      <Text className="font-sans text-xs text-muted">No other games scheduled</Text>
-                    </View>
                   </>
                 )}
               </View>

@@ -1,16 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
+import { CountdownText } from '../../../src/features/games/components/CountdownText';
 import { useMotmBallot, useVoteMotm } from '../../../src/features/games/hooks';
 import type { MotmBallotModel } from '../../../src/features/games/types';
 import { Avatar } from '../../../src/features/home/components/Avatar';
 import { EmptyState } from '../../../src/features/home/components/EmptyState';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
-import { formatCountdown } from '../../../src/lib/format';
+import { useRefreshAt } from '../../../src/lib/useRefreshAt';
 import { useUnsavedChangesGuard } from '../../../src/lib/useUnsavedChangesGuard';
 import { colors } from '../../../src/theme/tokens';
 
@@ -29,29 +30,19 @@ function motmBarWidth(voteCount: number | null, lead: number): number {
   return Math.round((voteCount / lead) * 100);
 }
 
-function useNow(intervalMs = 1000) {
-  const [now, setNow] = useState(() => new Date());
-  useFocusEffect(
-    useCallback(() => {
-      setNow(new Date());
-      const id = setInterval(() => setNow(new Date()), intervalMs);
-      return () => clearInterval(id);
-    }, [intervalMs]),
-  );
-  return now;
-}
-
 export default function MotmVoteScreen() {
   const { gameId } = useLocalSearchParams<{ gameId: string }>();
-  const now = useNow();
   const ballotQuery = useMotmBallot(gameId);
   const { vote, pending, error } = useVoteMotm(gameId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const ballot = ballotQuery.data;
+  const now = useRefreshAt([ballot?.isOpen ? ballot.closesAt : null]);
+  const votingOpen =
+    !!ballot?.isOpen && (!ballot.closesAt || new Date(ballot.closesAt).getTime() > now.getTime());
   const leadVotes = ballot ? leadingVoteCount(ballot) : 0;
   const selected = selectedId ?? ballot?.myVoteUserId ?? null;
-  const isDirty = ballot?.isOpen === true && selectedId != null && selectedId !== ballot.myVoteUserId;
+  const isDirty = votingOpen && selectedId != null && selectedId !== ballot?.myVoteUserId;
   const { allowLeave } = useUnsavedChangesGuard(isDirty);
 
   return (
@@ -61,6 +52,8 @@ export default function MotmVoteScreen() {
           <Pressable
             onPress={() => router.back()}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
             className="h-10 w-10 items-center justify-center rounded-full bg-background"
           >
             <Ionicons name="chevron-back" size={18} color={colors.ink} />
@@ -88,8 +81,12 @@ export default function MotmVoteScreen() {
           >
             <View className="gap-1">
               <Text className="font-sans-bold text-xl text-ink">{ballot.title || ballot.groupName}</Text>
-              {ballot.isOpen && ballot.closesAt ? (
-                <Text className="font-sans text-sm text-muted">Voting closes in {formatCountdown(ballot.closesAt, now)}</Text>
+              {votingOpen && ballot.closesAt ? (
+                <CountdownText
+                  target={ballot.closesAt}
+                  prefix="Voting closes in "
+                  className="font-sans text-sm text-muted"
+                />
               ) : ballot.motmName ? (
                 <Text className="font-sans-bold text-sm text-primary">Winner: {ballot.motmName}</Text>
               ) : (
@@ -121,7 +118,7 @@ export default function MotmVoteScreen() {
                   return (
                     <Pressable
                       key={candidate.userId}
-                      disabled={!ballot.isOpen}
+                      disabled={!votingOpen}
                       onPress={() => setSelectedId(candidate.userId)}
                       className={`gap-2 px-4 py-4 ${index > 0 ? 'border-t border-[#F9FAFB]' : ''} ${
                         isWinner ? 'bg-accent/15' : isSelected ? 'bg-accent/15' : ''
@@ -131,8 +128,8 @@ export default function MotmVoteScreen() {
                         <Avatar uri={candidate.avatarUrl} name={candidate.name} size={44} />
                         <View className="flex-1">
                           <Text className="font-sans-bold text-sm text-ink">{candidate.name}</Text>
-                          <Text className="font-sans text-[10px] text-muted">
-                            {isWinner ? 'Man of the Match' : `MMR ${candidate.mmr}`}
+                          <Text className="font-sans text-xs text-muted">
+                            {isWinner ? 'Man of the Match' : `Rating ${candidate.mmr.toLocaleString('en-GB')}`}
                           </Text>
                         </View>
                         {!ballot.isOpen && voteCount != null ? (
@@ -141,7 +138,7 @@ export default function MotmVoteScreen() {
                           </Text>
                         ) : null}
                         {isWinner ? <Ionicons name="trophy" size={20} color={colors.gold} /> : null}
-                        {ballot.isOpen && isSelected ? (
+                        {votingOpen && isSelected ? (
                           <Ionicons name="checkmark-circle" size={22} color={colors.primary} />
                         ) : null}
                       </View>
@@ -158,7 +155,7 @@ export default function MotmVoteScreen() {
             {error ? <Text className="font-sans-medium text-sm text-danger">{error}</Text> : null}
           </ScrollView>
 
-          {ballot.isOpen && ballot.candidates.length > 0 ? (
+          {votingOpen && ballot.candidates.length > 0 ? (
             <View className="border-t border-border bg-white px-4 py-4">
               <PrimaryButton
                 label={ballot.myVoteUserId ? 'Update vote' : 'Submit vote'}

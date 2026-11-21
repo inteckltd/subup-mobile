@@ -3,6 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 
 import { formatGameDayLabel, formatGbp, formatUkTime } from '../../../lib/format';
 import { colors } from '../../../theme/tokens';
+import { playerTotalCents } from '../../payments/fees';
 import type { GameCardModel } from '../types';
 
 type GameCardProps = {
@@ -27,7 +28,7 @@ export function GameCard({ game, onPress, onPressJoin }: GameCardProps) {
           <Text className="font-sans-bold text-[11px] text-primary">{formatGameDayLabel(game.startsAt)}</Text>
         </View>
         <Text className="font-sans text-xs text-muted">
-          {formatUkTime(game.startsAt)} · {formatGbp(game.priceCents)}
+          {formatUkTime(game.startsAt)} · {formatGbp(playerTotalCents(game.priceCents))}
         </Text>
       </View>
 
@@ -62,21 +63,21 @@ export function GameCard({ game, onPress, onPressJoin }: GameCardProps) {
       </View>
 
       <View className="flex-row items-center justify-between pt-3">
-        <View className="flex-row items-center gap-1">
+        <View className="min-w-0 flex-1 flex-row items-center gap-1 pr-2">
           <Ionicons name="people-outline" size={14} color={colors.muted} />
-          <Text className="font-sans text-xs text-muted">{game.spotsTaken} joined</Text>
+          <Text className="font-sans text-xs text-muted" numberOfLines={1}>
+            {game.spotsTaken} joined
+          </Text>
         </View>
-        {game.hasJoined ? (
-          <Pressable onPress={onPressJoin} className="flex-row items-center gap-1.5 rounded-full bg-accent/20 px-4 py-2">
-            <Ionicons name="checkmark" size={14} color={colors.primary} />
-            <Text className="font-sans-bold text-xs text-primary">Joined</Text>
-          </Pressable>
-        ) : (
-          <Pressable onPress={onPressJoin} className="flex-row items-center gap-1.5 rounded-full bg-ink px-4 py-2">
-            <Text className="font-sans-bold text-xs text-white">Join</Text>
-            <Ionicons name="arrow-forward" size={12} color={colors.white} />
-          </Pressable>
-        )}
+        {game.hasJoined ? <Text className="mr-2 font-sans-bold text-xs text-primary">Joined</Text> : null}
+        <Pressable
+          onPress={onPressJoin}
+          accessibilityRole="button"
+          accessibilityLabel="View game"
+          className="min-h-11 items-center justify-center rounded-full bg-ink px-4"
+        >
+          <Text className="font-sans-bold text-sm text-white">View</Text>
+        </Pressable>
       </View>
     </Pressable>
   );

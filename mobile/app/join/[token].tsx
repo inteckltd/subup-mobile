@@ -118,6 +118,8 @@ export default function JoinGroupScreen() {
           <Pressable
             onPress={goHome}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
             className="h-10 w-10 items-center justify-center rounded-full bg-background"
           >
             <Ionicons name="chevron-back" size={18} color={colors.ink} />

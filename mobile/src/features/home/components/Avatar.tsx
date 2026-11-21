@@ -45,7 +45,9 @@ export function Avatar({ uri, name, size, ringColor, ringWidth = 0 }: AvatarProp
       {uri ? (
         <Image source={{ uri }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
       ) : (
-        <Text style={{ color: colors.white, fontSize: size * 0.36, fontWeight: '700' }}>{getInitials(name)}</Text>
+        <Text allowFontScaling={false} style={{ color: colors.white, fontSize: size * 0.36, fontWeight: '700' }}>
+          {getInitials(name)}
+        </Text>
       )}
     </View>
   );

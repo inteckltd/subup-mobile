@@ -77,46 +77,53 @@ export default function ProfileScreen() {
               <View className="flex-1 items-center rounded-2xl border border-border bg-white p-4">
                 <Ionicons name="football-outline" size={18} color={colors.primary} />
                 <Text className="pt-1 font-sans-bold text-lg text-ink">{stats?.gamesPlayed ?? 0}</Text>
-                <Text className="font-sans-bold text-[9px] uppercase tracking-wide text-muted">Games</Text>
+                <Text className="font-sans-bold text-xs text-muted">Games</Text>
               </View>
               <View className="flex-1 items-center rounded-2xl border border-border bg-white p-4">
                 <Ionicons name="trending-up-outline" size={18} color={colors.primary} />
                 <Text className="pt-1 font-sans-bold text-lg text-ink">{winRateLabel}</Text>
-                <Text className="font-sans-bold text-[9px] uppercase tracking-wide text-muted">Win rate</Text>
+                <Text className="font-sans-bold text-xs text-muted">Win rate</Text>
               </View>
               <View className="flex-1 items-center rounded-2xl border border-border bg-white p-4">
                 <Ionicons name="trophy-outline" size={18} color={colors.primary} />
                 <Text className="pt-1 font-sans-bold text-lg text-ink">{stats?.motmCount ?? 0}</Text>
-                <Text className="font-sans-bold text-[9px] uppercase tracking-wide text-muted">MOTM</Text>
+                <Text accessibilityLabel="Man of the Match" className="font-sans-bold text-xs text-muted">
+                  MOTM
+                </Text>
               </View>
             </View>
           )}
 
           <View className="gap-4 rounded-3xl border border-border bg-white p-6">
             <View className="flex-row items-center justify-between">
-              <Text className="font-sans-bold text-sm text-ink">Recent Form</Text>
-              <Text className="font-sans-bold text-[10px] uppercase tracking-wide text-muted">Last 5 games</Text>
+              <Text className="font-sans-bold text-sm text-ink">Recent form</Text>
+              <Text className="font-sans text-xs text-muted">Last 5 games</Text>
             </View>
             {recentQuery.isPending ? (
               <ActivityIndicator color={colors.primary} />
             ) : form.length === 0 ? (
               <Text className="font-sans text-sm text-muted">Play some games to build your recent form.</Text>
             ) : (
-              <View className="flex-row gap-2">
-                {form.map((game) => {
-                  const style = formLetterStyle(game.result);
-                  return (
-                    <View
-                      key={game.id}
-                      className="h-10 w-10 items-center justify-center rounded-xl"
-                      style={{ backgroundColor: style.bg }}
-                    >
-                      <Text className="font-sans-extrabold text-sm" style={{ color: style.text }}>
-                        {game.result}
-                      </Text>
-                    </View>
-                  );
-                })}
+              <View className="gap-2">
+                <Text className="font-sans text-xs text-muted">W win · D draw · L loss</Text>
+                <View className="flex-row gap-2">
+                  {form.map((game) => {
+                    const style = formLetterStyle(game.result);
+                    const resultName = game.result === 'W' ? 'Win' : game.result === 'L' ? 'Loss' : 'Draw';
+                    return (
+                      <View
+                        key={game.id}
+                        accessibilityLabel={resultName}
+                        className="h-10 w-10 items-center justify-center rounded-xl"
+                        style={{ backgroundColor: style.bg }}
+                      >
+                        <Text className="font-sans-extrabold text-sm" style={{ color: style.text }}>
+                          {game.result}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
               </View>
             )}
           </View>
@@ -164,9 +171,7 @@ export default function ProfileScreen() {
                     <Text className="font-sans-bold text-sm text-ink" numberOfLines={1}>
                       {row.groupName}
                     </Text>
-                    <Text className="font-sans text-[10px] text-muted">
-                      {reliabilityLabel(row.ratedGames)} · {row.ratedGames} rated {row.ratedGames === 1 ? 'game' : 'games'}
-                    </Text>
+                    <Text className="font-sans text-xs text-muted">{reliabilityLabel(row.ratedGames)}</Text>
                   </View>
                   <RatingPill mmr={row.mmr} />
                 </Pressable>

@@ -117,6 +117,8 @@ export default function CreateGroupScreen() {
           <Pressable
             onPress={() => router.back()}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
             className="h-10 w-10 items-center justify-center rounded-full bg-background"
           >
             <Ionicons name="close" size={18} color={colors.ink} />
@@ -234,14 +236,14 @@ export default function CreateGroupScreen() {
                 control={control}
                 name="hour"
                 render={({ field }) => (
-                  <Stepper label="Hour" value={field.value} min={0} max={23} formatValue={pad2} onChange={field.onChange} />
+                  <Stepper label="Hour" value={field.value} min={0} max={23} wrap formatValue={pad2} onChange={field.onChange} />
                 )}
               />
               <Controller
                 control={control}
                 name="minute"
                 render={({ field }) => (
-                  <Stepper label="Minute" value={field.value} min={0} max={59} step={5} formatValue={pad2} onChange={field.onChange} />
+                  <Stepper label="Minute" value={field.value} min={0} max={59} step={5} wrap formatValue={pad2} onChange={field.onChange} />
                 )}
               />
             </View>

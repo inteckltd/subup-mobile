@@ -13,12 +13,13 @@ export function ratingReliability(ratedGames: number): RatingReliability {
   return 'High';
 }
 
-/** "Reliability: Medium" */
+/** "Based on 2 games" — how many results the group rating is drawn from. */
 export function reliabilityLabel(ratedGames: number): string {
-  return `Reliability: ${ratingReliability(ratedGames)}`;
+  const count = Math.max(0, ratedGames);
+  return `Based on ${count} ${count === 1 ? 'game' : 'games'}`;
 }
 
-/** "1,040 MMR · Reliability: High" — always a group rating. */
+/** "Rating 1,040 · Based on 18 games" — always a group rating. */
 export function formatGroupRating(mmr: number, ratedGames: number): string {
-  return `${mmr.toLocaleString('en-GB')} MMR · ${reliabilityLabel(ratedGames)}`;
+  return `Rating ${mmr.toLocaleString('en-GB')} · ${reliabilityLabel(ratedGames)}`;
 }

@@ -122,7 +122,7 @@ export function PlayerLobbyRow({
           <Text className="font-sans-bold text-sm text-ink" numberOfLines={1}>
             {player.name}
           </Text>
-          <Text className="font-sans text-[10px] text-muted">{formatGroupRating(player.mmr, player.ratedGames)}</Text>
+          <Text className="font-sans text-xs text-muted">{formatGroupRating(player.mmr, player.ratedGames)}</Text>
         </View>
       </View>
       <View className="flex-row items-center gap-1.5">

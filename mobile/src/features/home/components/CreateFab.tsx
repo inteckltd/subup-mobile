@@ -99,6 +99,9 @@ export function CreateFab({ onCreateGame, onCreateGroup }: CreateFabProps) {
 
         <Pressable
           onPress={() => setOpenState(!open)}
+          accessibilityRole="button"
+          accessibilityLabel={open ? 'Close' : 'Create'}
+          accessibilityState={{ expanded: open }}
           className="h-14 w-14 items-center justify-center rounded-2xl bg-accent"
           style={{ shadowColor: colors.accent, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 8 } }}
         >
