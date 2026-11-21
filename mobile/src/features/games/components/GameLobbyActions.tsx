@@ -6,9 +6,7 @@ type GameLobbyActionsProps = {
   showSameAgain: boolean;
   onSameAgain: () => void;
   onSharePlayers: () => void;
-  onAddToCalendar: () => void;
   shareBusy?: boolean;
-  calendarBusy?: boolean;
   shareDisabled?: boolean;
   message?: string | null;
 };
@@ -18,9 +16,7 @@ export function GameLobbyActions({
   showSameAgain,
   onSameAgain,
   onSharePlayers,
-  onAddToCalendar,
   shareBusy,
-  calendarBusy,
   shareDisabled,
   message,
 }: GameLobbyActionsProps) {
@@ -41,13 +37,6 @@ export function GameLobbyActions({
         loading={shareBusy}
         disabled={shareDisabled}
         onPress={onSharePlayers}
-      />
-      <PrimaryButton
-        label="Add to calendar"
-        variant="outline"
-        icon="calendar-outline"
-        loading={calendarBusy}
-        onPress={onAddToCalendar}
       />
       {message ? <Text className="font-sans-medium text-sm text-danger">{message}</Text> : null}
     </View>

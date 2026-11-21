@@ -1,15 +1,46 @@
 import * as Sentry from '@sentry/react-native';
-import { AppState } from 'react-native';
 
-import {
-  clientErrorFingerprint,
-  describeClientError,
-  isExpectedClientError,
-  shouldDropKeychainNoise,
-} from './clientError';
 import { env } from './env';
 
 let initialized = false;
+
+const EXPECTED_AUTH_CODES = new Set([
+  'invalid_credentials',
+  'otp_expired',
+  'otp_disabled',
+  'user_already_exists',
+  'weak_password',
+  'over_request_rate_limit',
+  'over_email_send_rate_limit',
+  'over_sms_send_rate_limit',
+  'phone_exists',
+  'email_exists',
+  'same_password',
+]);
+
+const EXPECTED_AUTH_MESSAGE =
+  /invalid login credentials|email not confirmed|token has expired|already registered|already exists|signups not allowed|user not found|otp has expired/i;
+
+function errorText(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message: unknown }).message ?? '');
+  }
+  return '';
+}
+
+/** Wrong password, expired OTP, and similar user mistakes — keep out of Sentry. */
+export function isExpectedClientError(error: unknown): boolean {
+  if (!error) return false;
+  if (typeof error === 'object' && 'code' in error) {
+    const code = String((error as { code: unknown }).code ?? '');
+    if (EXPECTED_AUTH_CODES.has(code)) return true;
+  }
+  const text = errorText(error);
+  if (/AuthRetryableFetchError|network connection was lost/i.test(text)) return true;
+  return EXPECTED_AUTH_MESSAGE.test(text);
+}
 
 function exceptionText(event: Sentry.ErrorEvent): string {
   return (event.exception?.values ?? [])
@@ -31,22 +62,6 @@ function isRetryableNetworkAuthError(event: Sentry.ErrorEvent): boolean {
   return /AuthRetryableFetchError/i.test(text) || /network connection was lost/i.test(text);
 }
 
-/**
- * Keychain "User interaction is not allowed" while the app is not in front.
- * Uses Sentry's own foreground flag when it has one, otherwise AppState.
- * Does not change keychain accessibility or session storage.
- */
-function isBackgroundKeychainEvent(event: Sentry.ErrorEvent): boolean {
-  if (!/user interaction is not allowed|errsecinteractionnotallowed/i.test(exceptionText(event))) return false;
-  const app = event.contexts?.app as { in_foreground?: boolean } | undefined;
-  if (typeof app?.in_foreground === 'boolean') return app.in_foreground === false;
-  return AppState.currentState !== 'active';
-}
-
-function appInForeground(): boolean {
-  return AppState.currentState === 'active';
-}
-
 export function initSentry() {
   if (initialized || !env.EXPO_PUBLIC_SENTRY_DSN) return;
   Sentry.init({
@@ -57,9 +72,7 @@ export function initSentry() {
     appHangTimeoutInterval: 5,
     ignoreErrors: ['Invalid login credentials', 'AuthRetryableFetchError'],
     beforeSend(event) {
-      if (isSimulatorAppHang(event) || isRetryableNetworkAuthError(event) || isBackgroundKeychainEvent(event)) {
-        return null;
-      }
+      if (isSimulatorAppHang(event) || isRetryableNetworkAuthError(event)) return null;
       return event;
     },
   });
@@ -74,26 +87,7 @@ export function setSentryUser(userId: string | null) {
 
 export function captureSentryException(error: unknown, source?: string) {
   if (!initialized || isExpectedClientError(error)) return;
-  const described = describeClientError(error);
-  if (shouldDropKeychainNoise(described, { inForeground: appInForeground() })) return;
-
-  const exception = new Error(described.message);
-  exception.name = described.name;
-  if (error instanceof Error && error.stack) exception.stack = error.stack;
-  if (error instanceof Error) exception.cause = error;
-
-  Sentry.captureException(exception, {
-    tags: {
-      ...(source ? { source } : {}),
-      ...(described.code ? { error_code: described.code } : {}),
-    },
-    fingerprint: clientErrorFingerprint(source, described),
-    extra: {
-      underlying_message: described.message,
-      ...(described.details ? { details: described.details } : {}),
-      ...(described.hint ? { hint: described.hint } : {}),
-    },
-  });
+  Sentry.captureException(error, source ? { tags: { source } } : undefined);
 }
 
-export { isExpectedClientError, Sentry };
+export { Sentry };
