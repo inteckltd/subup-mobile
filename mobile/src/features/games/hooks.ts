@@ -6,6 +6,7 @@ import {
   createGame as createGameRequest,
   updateGame as updateGameRequest,
   cancelGame as cancelGameRequest,
+  confirmShortGame as confirmShortGameRequest,
   fetchCreatableGroups,
   fetchGameDetail,
   fetchGamePlayers,
@@ -169,6 +170,36 @@ export function useCancelGame(gameId: string | undefined) {
   }, [gameId, queryClient, session]);
 
   return { cancel, pending, error };
+}
+
+export function useConfirmShortGame(gameId: string | undefined) {
+  const queryClient = useQueryClient();
+  const { session } = useAuth();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const confirmShort = useCallback(async (): Promise<boolean> => {
+    if (!gameId) return false;
+    setError(null);
+    setPending(true);
+    const result = await confirmShortGameRequest(gameId);
+    setPending(false);
+    if (result.error) {
+      setError(result.error);
+      return false;
+    }
+    if (session) {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['game', gameId, 'detail', session.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ['game', gameId, 'players', session.user.id] }),
+        queryClient.invalidateQueries({ queryKey: ['home'] }),
+        queryClient.invalidateQueries({ queryKey: ['games'] }),
+      ]);
+    }
+    return true;
+  }, [gameId, queryClient, session]);
+
+  return { confirmShort, pending, error };
 }
 
 /** Drives Game Details' Join/Leave CTA — refetches detail + players on success. */

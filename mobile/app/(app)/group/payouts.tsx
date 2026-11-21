@@ -159,9 +159,9 @@ export default function GroupPayoutsScreen() {
           <Text className="font-sans-bold text-xs uppercase tracking-wider text-muted">Treasurer</Text>
           <Text className="mt-2 font-sans-bold text-base text-ink">{payouts.treasurerName}</Text>
           <Text className="mt-1 font-sans text-sm text-muted">
-            Pitch money stays in Stripe until a game locks and players can no longer leave. After that, this admin’s
-            pitch total is paid to their UK bank — usually around 2 business days. SubUp’s fee is collected when a
-            player pays.
+            Cards are held until the game is confirmed at lock. The pitch is taken then, and this admin’s pitch total
+            is paid to their UK bank after kickoff — usually around 2 business days. SubUp’s fee is collected when the
+            game is confirmed, not when someone joins.
           </Text>
           {admins.length > 1 ? (
             <Pressable onPress={onChangeTreasurer} className="mt-3">

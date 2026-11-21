@@ -49,7 +49,17 @@ supabase secrets set STRIPE_SECRET_KEY=sk_test_...
 supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_...
 ```
 
-`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` stay on Edge Functions only. After deploying `stripe-webhooks`, add that URL in the Stripe sandbox Dashboard and paste the signing secret into `STRIPE_WEBHOOK_SECRET`.
+`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` stay on Edge Functions only. After deploying `stripe-webhooks`, add that URL in the Stripe **test mode** Dashboard (not live) and paste the signing secret into `STRIPE_WEBHOOK_SECRET`.
+
+Webhook events the endpoint must receive:
+
+- `payment_intent.succeeded` (capture completed)
+- `payment_intent.amount_capturable_updated` (hold placed)
+- `payment_intent.payment_failed`
+- `payment_intent.canceled` (hold released or expired)
+- `setup_intent.succeeded` (card saved for a game that locks more than 4 days out)
+- `charge.refunded`
+- `account.updated`
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are injected by the platform.
 
@@ -69,6 +79,8 @@ supabase functions deploy send-score-reminders
 supabase functions deploy send-lock-reminders
 supabase functions deploy create-connect-account-link
 supabase functions deploy create-join-payment
+supabase functions deploy sync-join-payment
+supabase functions deploy confirm-short-game
 supabase functions deploy leave-paid-game
 supabase functions deploy refund-game-payments
 supabase functions deploy stripe-webhooks

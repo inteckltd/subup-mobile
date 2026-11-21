@@ -3,7 +3,6 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { recordDiagnosticError } from '../../lib/diagnostics';
 import { supabase } from '../../lib/supabase';
-import { logMetaStandardEvent, MetaEvents } from '../../lib/metaTracking';
 import type { GroupPayoutsRow } from '../../types/database';
 import type { GroupPayoutsModel } from '../group-details/types';
 
@@ -15,7 +14,7 @@ function friendlyError(error: unknown, fallback = GENERIC_ERROR): string {
   if (error && typeof error === 'object' && 'message' in error) {
     const message = String((error as { message: unknown }).message);
     if (
-      /Pay to join|already joined|no longer open|not a member|full|locked|cannot take payments|waitlist|Set up payouts|Payouts can only|organiser needs to finish Stripe/i
+      /Pay to join|already joined|no longer open|not a member|full|locked|cannot take payments|waitlist|Set up payouts|Payouts can only|organiser needs to finish Stripe|organiser confirms/i
         .test(message)
     ) {
       return message;
@@ -186,18 +185,27 @@ export async function startConnectOnboarding(): Promise<{ url?: string; error?: 
 
 export async function payToJoinGame(gameId: string): Promise<{ error?: string }> {
   const { data, error } = await supabase.functions.invoke('create-join-payment', { body: { gameId } });
-  if (error || data?.ok === false || !data?.clientSecret) {
+  if (error || data?.ok === false) {
     await supabase.rpc('release_my_pending_join', { p_game_id: gameId });
     return { error: friendlyError(error ?? data, data?.error ?? "Couldn't start payment.") };
   }
+  if (data.mode === 'already_held' || data.mode === 'already_saved') {
+    return {};
+  }
+  if (!data.clientSecret) {
+    await supabase.rpc('release_my_pending_join', { p_game_id: gameId });
+    return { error: friendlyError(data, data?.error ?? "Couldn't start payment.") };
+  }
 
-  const init = await initPaymentSheet({
-    paymentIntentClientSecret: data.clientSecret as string,
+  const sheet = {
     merchantDisplayName: 'SubUp',
     returnURL: 'subup://stripe-redirect',
-    googlePay: { merchantCountryCode: 'GB', testEnv: true, currencyCode: 'GBP' },
-    applePay: { merchantCountryCode: 'GB' },
-  });
+    googlePay: { merchantCountryCode: 'GB' as const, testEnv: true as const, currencyCode: 'GBP' as const },
+    applePay: { merchantCountryCode: 'GB' as const },
+  };
+  const init = await (data.mode === 'setup'
+    ? initPaymentSheet({ ...sheet, setupIntentClientSecret: data.clientSecret as string })
+    : initPaymentSheet({ ...sheet, paymentIntentClientSecret: data.clientSecret as string }));
   if (init.error) {
     return { error: init.error.message || "Couldn't open Apple Pay / card pay." };
   }
@@ -210,12 +218,6 @@ export async function payToJoinGame(gameId: string): Promise<{ error?: string }>
     return { error: presented.error.message || 'Payment failed.' };
   }
 
-  if (typeof data.amount === 'number') {
-    logMetaStandardEvent(MetaEvents.PURCHASED, data.amount / 100, {
-      currency: 'GBP',
-      content_type: 'game_join',
-    });
-  }
-
+  await supabase.functions.invoke('sync-join-payment', { body: { gameId } });
   return {};
 }

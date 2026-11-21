@@ -1,7 +1,10 @@
-// Reserve a paid spot and return a PaymentIntent client_secret for PaymentSheet.
+// Reserve a paid spot and return a PaymentSheet secret.
+// Lock within 4 days: manual-capture PaymentIntent (bank hold, not a charge).
+// Further out: SetupIntent that saves the card. The lock cron places the hold later.
 
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
+import { ensureStripeCustomer, manualHoldParams } from '../_shared/lock-runner.ts';
 import { accountTransfersEnabled, createAnonClient, getStripe, jsonResponse, requireUserId } from '../_shared/stripe.ts';
 
 type ReserveRow = {
@@ -11,6 +14,10 @@ type ReserveRow = {
   fee_cents: number;
   total_cents: number;
   existing_payment_intent_id: string | null;
+  existing_setup_intent_id: string | null;
+  hold_now: boolean;
+  stripe_customer_id: string | null;
+  payment_status: string;
 };
 
 Deno.serve(async (req) => {
@@ -49,7 +56,7 @@ Deno.serve(async (req) => {
     if (error) {
       const message = error.message ?? '';
       if (
-        /Pay to join|already joined|no longer open|not a member|full|locked|cannot take payments|waitlist|free|Teams have already/i
+        /Pay to join|already joined|no longer open|not a member|full|locked|cannot take payments|waitlist|free|Teams have already|organiser confirms/i
           .test(message)
       ) {
         return jsonResponse({ ok: false, error: message }, 400);
@@ -62,7 +69,28 @@ Deno.serve(async (req) => {
     if (!row) {
       return jsonResponse({ ok: false, error: "Couldn't reserve a spot" }, 400);
     }
-    reservedPlayerId = row.game_player_id;
+    if (row.payment_status === 'pending') reservedPlayerId = row.game_player_id;
+
+    if (row.payment_status === 'authorized') {
+      return jsonResponse({
+        ok: true,
+        mode: 'already_held',
+        amountCents: row.total_cents,
+        feeCents: row.fee_cents,
+        pitchCents: row.pitch_cents,
+        holdNow: true,
+      });
+    }
+    if (row.payment_status === 'card_saved' && !row.hold_now) {
+      return jsonResponse({
+        ok: true,
+        mode: 'already_saved',
+        amountCents: row.total_cents,
+        feeCents: row.fee_cents,
+        pitchCents: row.pitch_cents,
+        holdNow: false,
+      });
+    }
 
     const stripe = getStripe();
     const destination = await stripe.accounts.retrieve(row.stripe_account_id);
@@ -74,12 +102,88 @@ Deno.serve(async (req) => {
       }, 400);
     }
 
+    const customerId = await ensureStripeCustomer(stripe, service, auth.userId, row.stripe_customer_id);
+    const amounts = {
+      amountCents: row.total_cents,
+      feeCents: row.fee_cents,
+      pitchCents: row.pitch_cents,
+      holdNow: row.hold_now,
+    };
+
+    if (!row.hold_now) {
+      let setupIntentId = row.existing_setup_intent_id;
+      let clientSecret: string | null = null;
+      if (setupIntentId) {
+        const existing = await stripe.setupIntents.retrieve(setupIntentId);
+        if (existing.status === 'requires_payment_method' || existing.status === 'requires_confirmation' || existing.status === 'requires_action') {
+          clientSecret = existing.client_secret;
+        } else if (existing.status === 'succeeded') {
+          const method = existing.payment_method;
+          const methodId = typeof method === 'string' ? method : method?.id ?? null;
+          await service.rpc('mark_join_card_saved', {
+            p_game_player_id: row.game_player_id,
+            p_setup_intent_id: existing.id,
+            p_payment_method_id: methodId,
+          });
+          reservedPlayerId = null;
+          return jsonResponse({ ok: true, mode: 'already_saved', ...amounts });
+        } else {
+          setupIntentId = null;
+        }
+      }
+
+      if (!setupIntentId || !clientSecret) {
+        const setup = await stripe.setupIntents.create(
+          {
+            customer: customerId,
+            usage: 'off_session',
+            automatic_payment_methods: { enabled: true },
+            metadata: {
+              game_id: gameId,
+              user_id: auth.userId,
+              game_player_id: row.game_player_id,
+            },
+          },
+          { idempotencyKey: `setup:${row.game_player_id}` },
+        );
+        setupIntentId = setup.id;
+        clientSecret = setup.client_secret;
+        const { error: attachError } = await service.rpc('attach_setup_intent', {
+          p_game_player_id: row.game_player_id,
+          p_setup_intent_id: setupIntentId,
+          p_amount_cents: row.total_cents,
+          p_application_fee_cents: row.fee_cents,
+          p_pitch_cents: row.pitch_cents,
+        });
+        if (attachError) {
+          await stripe.setupIntents.cancel(setupIntentId).catch(() => {});
+          throw attachError;
+        }
+      }
+
+      reservedPlayerId = null;
+      return jsonResponse({
+        ok: true,
+        mode: 'setup',
+        clientSecret,
+        setupIntentId,
+        ...amounts,
+      });
+    }
+
     let paymentIntentId = row.existing_payment_intent_id;
     let clientSecret: string | null = null;
-
     if (paymentIntentId) {
       const existing = await stripe.paymentIntents.retrieve(paymentIntentId);
-      if (existing.status === 'requires_payment_method' || existing.status === 'requires_confirmation') {
+      if (existing.status === 'requires_capture') {
+        reservedPlayerId = null;
+        return jsonResponse({ ok: true, mode: 'already_held', paymentIntentId, ...amounts });
+      }
+      if (
+        existing.status === 'requires_payment_method' ||
+        existing.status === 'requires_confirmation' ||
+        existing.status === 'requires_action'
+      ) {
         clientSecret = existing.client_secret;
       } else {
         paymentIntentId = null;
@@ -87,18 +191,22 @@ Deno.serve(async (req) => {
     }
 
     if (!paymentIntentId || !clientSecret) {
-      const intent = await stripe.paymentIntents.create({
-        amount: row.total_cents,
-        currency: 'gbp',
-        application_fee_amount: row.fee_cents,
-        transfer_data: { destination: row.stripe_account_id },
-        automatic_payment_methods: { enabled: true },
-        metadata: {
-          game_id: gameId,
-          user_id: auth.userId,
-          game_player_id: row.game_player_id,
-        },
-      });
+      const previousIntentId = row.existing_payment_intent_id ?? 'first';
+      const retryKey = row.payment_status === 'card_saved'
+        ? `join:${row.game_player_id}:confirm:${previousIntentId}`
+        : `join:${row.game_player_id}:${previousIntentId}`;
+      const intent = await stripe.paymentIntents.create(
+        manualHoldParams({
+          totalCents: row.total_cents,
+          feeCents: row.fee_cents,
+          destination: row.stripe_account_id,
+          customerId,
+          gameId,
+          userId: auth.userId,
+          gamePlayerId: row.game_player_id,
+        }),
+        { idempotencyKey: retryKey },
+      );
       paymentIntentId = intent.id;
       clientSecret = intent.client_secret;
       const { error: attachError } = await service.rpc('attach_payment_intent', {
@@ -117,11 +225,10 @@ Deno.serve(async (req) => {
     reservedPlayerId = null;
     return jsonResponse({
       ok: true,
+      mode: 'payment',
       clientSecret,
       paymentIntentId,
-      amountCents: row.total_cents,
-      feeCents: row.fee_cents,
-      pitchCents: row.pitch_cents,
+      ...amounts,
     });
   } catch (error) {
     await releaseReservation();

@@ -53,13 +53,48 @@ Deno.serve(async (req) => {
         });
         break;
       }
-      case 'payment_intent.payment_failed':
+      case 'payment_intent.amount_capturable_updated': {
+        const intent = event.data.object as Stripe.PaymentIntent;
+        if (intent.status === 'requires_capture' && intent.amount_capturable > 0) {
+          const method = intent.payment_method;
+          const methodId = typeof method === 'string' ? method : method?.id ?? null;
+          await service.rpc('mark_join_authorized', {
+            p_payment_intent_id: intent.id,
+            p_payment_method_id: methodId,
+            p_capture_before: null,
+          });
+        }
+        break;
+      }
+      case 'setup_intent.succeeded': {
+        const setup = event.data.object as Stripe.SetupIntent;
+        const playerId = setup.metadata?.game_player_id;
+        if (playerId) {
+          const method = setup.payment_method;
+          const methodId = typeof method === 'string' ? method : method?.id ?? null;
+          await service.rpc('mark_join_card_saved', {
+            p_game_player_id: playerId,
+            p_setup_intent_id: setup.id,
+            p_payment_method_id: methodId,
+          });
+        }
+        break;
+      }
+      case 'payment_intent.payment_failed': {
+        const intent = event.data.object as Stripe.PaymentIntent;
+        await service.rpc('release_pending_join', {
+          p_payment_intent_id: intent.id,
+          p_status: 'failed',
+        });
+        break;
+      }
       case 'payment_intent.canceled': {
         const intent = event.data.object as Stripe.PaymentIntent;
         await service.rpc('release_pending_join', {
           p_payment_intent_id: intent.id,
-          p_status: event.type === 'payment_intent.canceled' ? 'canceled' : 'failed',
+          p_status: 'canceled',
         });
+        await service.rpc('note_hold_canceled', { p_payment_intent_id: intent.id });
         break;
       }
       case 'charge.refunded': {

@@ -6,7 +6,7 @@ A stolen **publishable / anon key is expected** (it ships in the app). Defence i
 
 - `anon` is revoked on domain tables. `is_email_taken` is granted to `anon` (boolean only) and is **rate-limited**.
 - Game, membership, invite, and score **writes** go through `SECURITY DEFINER` RPCs (`search_path = public, pg_temp`). Direct INSERT/UPDATE/DELETE policies on `games`, `game_players`, `group_members`, and `group_invites` are dropped.
-- `game_payments` has no client grants. `stripe_accounts` is own-row SELECT only. `payment_status = paid` is set only by the Stripe webhook (service role).
+- `game_payments` and `stripe_customers` have no client grants. `stripe_accounts` is own-row SELECT only. `payment_status` of `authorized`, `card_saved`, and `paid` is set only by Edge Functions (service role), including the Stripe webhook.
 - `groups` keeps client INSERT (create group + trigger adds the admin). Updates go through `update_group`.
 - Profile stats and `profiles.mobile` cannot be updated by the role `authenticated` (triggers). Mobile changes use `update-my-mobile` (OTP) or `confirm_my_mobile` after Auth OTP.
 - Group-mates cannot `SELECT` another profile’s mobile or email. Rosters use `get_group_members` / `get_game_lobby_players`.

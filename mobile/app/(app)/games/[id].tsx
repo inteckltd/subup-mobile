@@ -18,9 +18,10 @@ import { EmptyState } from '../../../src/features/home/components/EmptyState';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { PlayerLobbyRow } from '../../../src/features/games/components/PlayerLobbyRow';
 import { TeamBoard, TeamDragOverlay, useTeamDrag } from '../../../src/features/games/components/TeamBoard';
-import { useCancelGame, useGameDetail, useGameDetailRefresh, useGamePlayers, useJoinLeaveGame, useMoveGamePlayerTeam } from '../../../src/features/games/hooks';
+import { useCancelGame, useConfirmShortGame, useGameDetail, useGameDetailRefresh, useGamePlayers, useJoinLeaveGame, useMoveGamePlayerTeam } from '../../../src/features/games/hooks';
 import { teamColorById } from '../../../src/features/games/schemas';
 import type { GamePlayerModel } from '../../../src/features/games/types';
+import type { PaymentStatus } from '../../../src/types/database';
 import { colors } from '../../../src/theme/tokens';
 
 function useNow(intervalMs = 1000) {
@@ -53,13 +54,28 @@ function PlayerList({ players, motmUserId }: { players: GamePlayerModel[]; motmU
   );
 }
 
-function confirmLeaveGame(input: { isWaitlisted: boolean; paid: boolean; onLeave: () => void }) {
+const HOLD_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
+
+function holdIsDue(startsAt: string, lockHours: number, now: Date): boolean {
+  const lockAt = new Date(startsAt).getTime() - lockHours * 60 * 60 * 1000;
+  return lockAt - now.getTime() <= HOLD_WINDOW_MS;
+}
+
+function confirmLeaveGame(input: {
+  isWaitlisted: boolean;
+  paid: boolean;
+  paymentStatus: PaymentStatus | null;
+  onLeave: () => void;
+}) {
   const title = input.isWaitlisted ? 'Leave the waitlist?' : 'Leave this game?';
   let message: string | undefined;
   if (!input.isWaitlisted) {
-    message = input.paid
+    const held = input.paymentStatus === 'authorized' || input.paymentStatus === 'card_saved' || input.paymentStatus === 'pending';
+    message = input.paid && input.paymentStatus === 'paid'
       ? 'Are you sure you want to leave? The pitch cost will be refunded. The SubUp fee is not refunded.'
-      : 'Are you sure you want to leave this game?';
+      : input.paid && held
+        ? "The hold will be released. You won't be charged."
+        : 'Are you sure you want to leave this game?';
   }
   Alert.alert(title, message, [
     { text: 'Stay', style: 'cancel' },
@@ -77,6 +93,7 @@ export default function GameDetailsScreen() {
   const { refreshing, refresh } = useGameDetailRefresh(id);
   const { join, payAndJoin, leave, pending, error: actionError } = useJoinLeaveGame(id);
   const { cancel, pending: cancelling, error: cancelError } = useCancelGame(id);
+  const { confirmShort, pending: confirmingShort, error: shortError } = useConfirmShortGame(id);
   const { move, error: moveError } = useMoveGamePlayerTeam(id);
 
   const canDrag =
@@ -116,10 +133,19 @@ export default function GameDetailsScreen() {
   const insideLock = isInsideLockWindow(game.startsAt, lockHours, now);
   const minMet = (game.spotsPaid ?? 0) >= game.minPlayers;
   const teamsPicked = !!game.teamsPickedAt;
-  const confirmed = (insideLock && minMet) || teamsPicked;
+  const awaitingDecision = !!game.shortfallAt && !game.shortfallConfirmedAt && !teamsPicked && game.status !== 'cancelled';
+  const confirmed = !awaitingDecision && ((insideLock && minMet) || teamsPicked);
   const isCancelled = game.status === 'cancelled';
-  const belowMin = game.spotsTaken < game.minPlayers && lockHours > 0 && !teamsPicked && !isCancelled;
-  const needed = Math.max(game.minPlayers - game.spotsTaken, 0);
+  const rosterCount = game.priceCents > 0 ? game.spotsRoster : game.spotsTaken;
+  const belowMin = rosterCount < game.minPlayers && lockHours > 0 && !teamsPicked && !isCancelled && !awaitingDecision;
+  const needed = Math.max(game.minPlayers - rosterCount, 0);
+  const cardHoldDue = game.priceCents > 0 && holdIsDue(game.startsAt, lockHours, now);
+  const joinLabel = cardHoldDue ? `Hold ${formatGbp(game.totalCents)} to join` : `Save card to join`;
+  const stayLabel = game.myNeedsCardConfirm
+    ? 'Confirm card to stay in'
+    : cardHoldDue
+      ? `Hold ${formatGbp(game.totalCents)} to stay in`
+      : `Save card to stay in`;
   const homeColor = teamColorById(game.homeColor);
   const awayColor = teamColorById(game.awayColor);
   const confirmedPlayers = players.filter((player) => !player.isWaitlisted);
@@ -185,7 +211,11 @@ export default function GameDetailsScreen() {
                     onPress: () => {
                       Alert.alert(
                         'Cancel this game?',
-                        'Everyone who joined will be notified. Paid players get the pitch back; the SubUp fee is not refunded. You can’t undo this.',
+                        game.shortfallAt && !game.teamsPickedAt
+                          ? 'Holds will be released and nobody new is charged. Anyone already charged gets the pitch back. The SubUp fee on a captured payment is not refunded.'
+                          : game.teamsPickedAt
+                            ? 'Everyone who joined will be notified. Paid players get the pitch back; the SubUp fee is not refunded. You can’t undo this.'
+                            : 'Holds will be released. Nobody is charged. You can’t undo this.',
                         [
                           { text: 'Keep game', style: 'cancel' },
                           {
@@ -302,7 +332,16 @@ export default function GameDetailsScreen() {
 
           {game.priceCents > 0 ? (
             <Text className="font-sans text-xs text-muted">
-              {formatGbp(game.priceCents)} pitch + {formatGbp(game.feeCents ?? 0)} SubUp fee
+              {formatGbp(game.priceCents)} pitch + {formatGbp(game.feeCents ?? 0)} SubUp fee.{' '}
+              {game.myPaymentStatus === 'paid'
+                ? 'You have been charged.'
+                : game.myPaymentStatus === 'authorized'
+                  ? "Your card is held. You're only charged when the game is confirmed."
+                  : game.myPaymentStatus === 'card_saved'
+                    ? cardHoldDue
+                      ? "Confirm your card to keep your spot. You're only charged when the game is confirmed."
+                      : "Your card is saved. We'll place a hold closer to the game. You're only charged when the game is confirmed."
+                    : "Your card is held when you join. You're only charged when the game is confirmed."}
             </Text>
           ) : null}
 
@@ -403,6 +442,52 @@ export default function GameDetailsScreen() {
           </View>
         ) : null}
 
+        {awaitingDecision ? (
+          <View className="w-full gap-3 rounded-3xl border border-[#FDE68A] bg-[#FFFBEB] p-6">
+            <Text className="font-sans-bold text-lg text-[#92400E]">This game is short</Text>
+            <Text className="font-sans text-sm text-[#92400E]">
+              {game.isAdmin
+                ? `Some cards could not be held, so you're under the minimum of ${game.minPlayers}. ${game.spotsCommitted} ${game.spotsCommitted === 1 ? 'player is' : 'players are'} still held and have not been charged. Go ahead short, or cancel and release every hold.`
+                : "The organiser is deciding whether this game goes ahead. Your card is only on hold until they confirm. You haven't been charged."}
+            </Text>
+            {game.isAdmin ? (
+              <View className="gap-3">
+                <PrimaryButton
+                  label={game.spotsCommitted > 0 ? `Go ahead with ${game.spotsCommitted}` : 'No cards left to charge'}
+                  disabled={game.spotsCommitted < 1 || confirmingShort || cancelling}
+                  loading={confirmingShort}
+                  onPress={() => {
+                    Alert.alert(
+                      'Go ahead short?',
+                      'Cards that are still held will be charged the pitch plus the SubUp fee. Players whose cards failed are already out.',
+                      [
+                        { text: 'Not yet', style: 'cancel' },
+                        { text: 'Charge and go ahead', onPress: () => void confirmShort() },
+                      ],
+                    );
+                  }}
+                />
+                <PrimaryButton
+                  label="Cancel game"
+                  variant="outline"
+                  disabled={confirmingShort || cancelling}
+                  loading={cancelling}
+                  onPress={() => {
+                    Alert.alert(
+                      'Cancel this game?',
+                      'Holds will be released and nobody new is charged. Anyone already charged gets the pitch back. The SubUp fee on a captured payment is not refunded.',
+                      [
+                        { text: 'Keep game', style: 'cancel' },
+                        { text: 'Cancel game', style: 'destructive', onPress: () => void cancel() },
+                      ],
+                    );
+                  }}
+                />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
         {belowMin && !isFinished && !hasEnded ? (
           <View className="flex-row items-start gap-3 rounded-2xl border border-[#FEF3C7] bg-[#FFFBEB] p-4">
             <Ionicons name="warning-outline" size={16} color="#92400E" style={{ marginTop: 1 }} />
@@ -468,8 +553,8 @@ export default function GameDetailsScreen() {
           )}
         </View>
 
-        {actionError || moveError || cancelError ? (
-          <Text className="font-sans-medium text-sm text-danger">{actionError || moveError || cancelError}</Text>
+        {actionError || moveError || cancelError || shortError ? (
+          <Text className="font-sans-medium text-sm text-danger">{actionError || moveError || cancelError || shortError}</Text>
         ) : null}
       </ScrollView>
 
@@ -504,17 +589,21 @@ export default function GameDetailsScreen() {
               <Ionicons name="hourglass-outline" size={14} color={colors.muted} />
               <Text className="font-sans-bold text-sm text-muted">Score not yet entered</Text>
             </View>
+          ) : awaitingDecision && game.isAdmin ? (
+            <View className="items-center py-2">
+              <Text className="text-center font-sans text-sm text-muted">Decide above whether to go ahead short or cancel.</Text>
+            </View>
           ) : canJoinOpen && game.priceCents > 0 ? (
             <PrimaryButton
-              label={`Pay ${formatGbp(game.totalCents)} to join`}
+              label={joinLabel}
               loading={pending}
               onPress={payAndJoin}
             />
           ) : canJoinOpen ? (
             <PrimaryButton label="Join Game" loading={pending} onPress={join} />
-          ) : game.hasJoined && game.myPaymentStatus === 'pending' && !game.isWaitlisted ? (
+          ) : game.hasJoined && (game.myPaymentStatus === 'pending' || game.myNeedsCardConfirm) && !game.isWaitlisted ? (
             <PrimaryButton
-              label={`Pay ${formatGbp(game.totalCents)} to stay in`}
+              label={stayLabel}
               loading={pending}
               onPress={payAndJoin}
             />
@@ -546,6 +635,7 @@ export default function GameDetailsScreen() {
                 confirmLeaveGame({
                   isWaitlisted: game.isWaitlisted,
                   paid,
+                  paymentStatus: game.myPaymentStatus,
                   onLeave: () => leave(paid),
                 });
               }}

@@ -9,7 +9,7 @@ Temporary list of work that is **still required** after the security / simplicit
 - [x] `supabase secrets set` `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET`
 - [x] `EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY` in mobile `.env` and EAS
 - [x] Deploy Edge Functions: `create-connect-account-link`, `create-join-payment`, `leave-paid-game`, `refund-game-payments`, `stripe-webhooks`, `stripe-connect-redirect`
-- [x] Stripe Dashboard: Connect Express (UK), webhook to `/functions/v1/stripe-webhooks` (`payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `charge.refunded`, `account.updated`)
+- [x] Stripe Dashboard: Connect Express (UK), webhook to `/functions/v1/stripe-webhooks`. Events: `payment_intent.succeeded`, `payment_intent.amount_capturable_updated`, `payment_intent.payment_failed`, `payment_intent.canceled`, `setup_intent.succeeded`, `charge.refunded`, `account.updated`. Add the two new events (`amount_capturable_updated`, `setup_intent.succeeded`) in the Dashboard before relying on holds. Do this in test mode first.
 - [x] Apple Pay merchant ID `merchant.com.inteck.pitchin` in Apple Developer + Stripe (test cards work without this)
 - [ ] Rebuild a **dev client** (`expo-dev-client`) — Stripe native SDK will not run in Expo Go
 

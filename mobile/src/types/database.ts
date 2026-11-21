@@ -13,7 +13,7 @@ export type InviteStatus = 'pending' | 'accepted' | 'declined' | 'expired' | 'ca
 
 export type GameStatus = 'draft' | 'open' | 'full' | 'cancelled' | 'completed';
 
-export type PaymentStatus = 'unpaid' | 'pending' | 'paid' | 'cash' | 'waived' | 'refunded';
+export type PaymentStatus = 'unpaid' | 'pending' | 'paid' | 'cash' | 'waived' | 'refunded' | 'authorized' | 'card_saved';
 
 export type LockHours = 12 | 24 | 48 | 72;
 
@@ -28,6 +28,7 @@ export type NotificationType =
   | 'score_reminder'
   | 'motm_reminder'
   | 'waitlist_promoted'
+  | 'game_shortfall'
   | 'system';
 
 export type Group = {
@@ -295,6 +296,11 @@ export type GameDetailRow = {
   fee_cents: number;
   total_cents: number;
   payouts_ready: boolean;
+  spots_committed: number;
+  spots_roster: number;
+  shortfall_at: string | null;
+  shortfall_confirmed_at: string | null;
+  my_needs_card_confirm: boolean;
 };
 
 export type GroupPayoutsRow = {
