@@ -149,6 +149,11 @@ function mapGameDetail(row: GameDetailRow): GameDetailModel {
     feeCents: row.fee_cents,
     totalCents: row.total_cents,
     payoutsReady: row.payouts_ready,
+    spotsCommitted: row.spots_committed ?? 0,
+    spotsRoster: row.spots_roster ?? 0,
+    shortfallAt: row.shortfall_at,
+    shortfallConfirmedAt: row.shortfall_confirmed_at,
+    myNeedsCardConfirm: !!row.my_needs_card_confirm,
   };
 }
 
@@ -260,6 +265,25 @@ export async function updateGame(gameId: string, values: CreateGameFormValues): 
     console.error('[games] notify-game-lifecycle invoke failed', pushError);
   }
 
+  return {};
+}
+
+export async function confirmShortGame(gameId: string): Promise<{ error?: string }> {
+  const { data, error } = await supabase.functions.invoke('confirm-short-game', { body: { gameId } });
+  if (error || data?.ok === false) {
+    const fromBody = data && typeof data === 'object' && typeof data.error === 'string' ? data.error : '';
+    if (fromBody) return { error: fromBody };
+    const context = error && typeof error === 'object' && 'context' in error ? (error as { context?: Response }).context : undefined;
+    if (context && typeof context.json === 'function') {
+      try {
+        const body = (await context.json()) as { error?: unknown };
+        if (typeof body?.error === 'string' && body.error.trim()) return { error: body.error };
+      } catch {
+        // Body already consumed.
+      }
+    }
+    return { error: friendlyError(error ?? data, "Couldn't confirm this game. Please try again.") };
+  }
   return {};
 }
 

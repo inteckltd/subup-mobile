@@ -8,18 +8,19 @@ This list is what was still open after the security / simplicity / docs pass. Ch
 
 - [x] Stripe Connect + pay-to-join (no cash / waive). Code is in; sandbox keys + webhook still needed.
 - [x] Apply migrations `023`–`026` on the hosted project
-- [x] Migrations in this repo now run through `038` (`supabase/migrations/`). `037` is per-group MMR and join questions (shipped in 1.0.4). `038` is the rating K window and a 12-hour lock option.
+- [x] Migrations in this repo now run through `040` (`supabase/migrations/`). `037` is per-group MMR and join questions (shipped in 1.0.4). `038` is the rating K window and a 12-hour lock option. `039` and `040` are hold-then-capture and are not applied to any hosted project yet.
 - [ ] Confirm the hosted project has every migration through `038` (this repo cannot see that database)
+- [ ] Apply `039` then `040` only after the hold-then-capture test plan. Do not apply them as part of the `038` catch-up.
 - [x] `supabase secrets set` `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET`
 - [x] `EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY` in mobile `.env` and EAS
 - [x] Deploy Edge Functions: `create-connect-account-link`, `create-join-payment`, `leave-paid-game`, `refund-game-payments`, `stripe-webhooks`, `stripe-connect-redirect`
-- [x] Stripe Dashboard: Connect Express (UK), webhook to `/functions/v1/stripe-webhooks` (`payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `charge.refunded`, `account.updated`)
+- [x] Stripe Dashboard: Connect Express (UK), webhook to `/functions/v1/stripe-webhooks`. Events: `payment_intent.succeeded`, `payment_intent.amount_capturable_updated`, `payment_intent.payment_failed`, `payment_intent.canceled`, `setup_intent.succeeded`, `charge.refunded`, `account.updated`. Add the two new events (`amount_capturable_updated`, `setup_intent.succeeded`) in the Dashboard before relying on holds. Do this in test mode first.
 - [x] Apple Pay merchant ID `merchant.com.inteck.pitchin` in Apple Developer + Stripe (test cards work without this)
 - [ ] Rebuild a **dev client** (`expo-dev-client`) — Stripe native SDK will not run in Expo Go
 
 ## Legal and trust
 
-- [ ] Solicitor review of in-app Terms + Privacy (`mobile/src/features/legal/copy.tsx`). In-app versions in `mobile/src/features/auth/schemas.ts` are Terms **1.7** and Privacy **1.5**. The public site (below) showed Terms 1.6 and Privacy 1.5 when these notes were written.
+- [ ] Solicitor review of in-app Terms + Privacy (`mobile/src/features/legal/copy.tsx`). In-app versions in `mobile/src/features/auth/schemas.ts` are Terms **1.8** and Privacy **1.6** (hold-then-capture re-consent). The public site (below) showed Terms 1.6 and Privacy 1.5 when these notes were written.
 - [x] Legal and marketing pages are live at **https://www.subupapp.co.uk** (Vercel, separate repo `inteckltd/subup-website`). Privacy: `/privacy`. Terms: `/terms`. This repo’s `site/` folder is a copy only. The GitHub Pages workflow (`.github/workflows/pages.yml`, “Deploy legal site”) is still in the repo and is not the live host. Its two Actions runs both failed; the later one was 9 September 2026.
 - [ ] Bump `TERMS_VERSION` / `PRIVACY_VERSION` after the lawyer text lands
 - [ ] Apple Privacy Nutrition + Google Data safety aligned with the policy

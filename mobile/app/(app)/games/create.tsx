@@ -324,8 +324,9 @@ export default function CreateGameScreen() {
                 <Text className="font-sans-medium text-xs text-danger">{errors.date.message}</Text>
               ) : selectedGroup ? (
                 <Text className="font-sans text-xs text-muted">
-                  Kickoff must be at least {selectedGroup.lockHours} hours away. Players can join or leave until then. If you
-                  still don’t have the minimum, the game is cancelled and the pitch money is refunded.
+                  Kickoff must be at least {selectedGroup.lockHours} hours away. Players can join or leave until then. Your card is
+                  only charged once the game is confirmed. If not enough players are in, the game is cancelled and nobody is
+                  charged.
                 </Text>
               ) : null}
             </View>
@@ -403,7 +404,7 @@ export default function CreateGameScreen() {
             <View className="w-full gap-1.5 border-t border-[#F9FAFB] pt-3">
               <Text className="font-sans-bold text-xs text-muted">Pitch cost per player</Text>
               <Text className="font-sans text-xs text-muted">
-                You receive this amount. Players pay this plus a SubUp fee in the app.
+                You receive this amount once the game is confirmed. Players are charged this plus a SubUp fee only then.
               </Text>
               <Controller
                 control={control}
@@ -415,8 +416,8 @@ export default function CreateGameScreen() {
               {errors.pricePounds ? <Text className="font-sans-medium text-xs text-danger">{errors.pricePounds.message}</Text> : null}
               {priceCents > 0 ? (
                 <Text className="font-sans text-xs text-muted">
-                  Players pay {formatGbp(playerTotalCents(priceCents))} ({formatGbp(priceCents)} +{' '}
-                  {formatGbp(pitchinServiceFeeCents(priceCents))} SubUp fee)
+                  Charged once the game is confirmed: {formatGbp(playerTotalCents(priceCents))} ({formatGbp(priceCents)} pitch +{' '}
+                  {formatGbp(pitchinServiceFeeCents(priceCents))} SubUp fee).
                 </Text>
               ) : null}
               {priceCents > 0 && !payoutsReady && watchedGroupId ? (

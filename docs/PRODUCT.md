@@ -30,8 +30,8 @@ WhatsApp groups fail at:
 2. Create or join **invite-only groups** (e.g. "Woolston 7:30pm Football")
 3. Admins invite by mobile (or email if provided), promote other admins
 4. Admins create **games** (date/time, venue, min/max players, cost, notes)
-5. Players join and pay (Apple Pay / Google Pay / card). No pay = not in the game. Free (£0) games skip Stripe.
-6. Enforce **max players**; if **min players** not met before the group’s lock window (12, 24, 48, or 72 hours) → auto-cancel + refund the pitch
+5. Players join with Apple Pay, Google Pay, or card. The card is held and charged only when the game is confirmed. No card, no spot. Free (£0) games skip Stripe.
+6. Enforce **max players**. If too few players have committed a card by the group’s lock window (12, 24, 48, or 72 hours before kickoff) the game auto-cancels and nobody is charged. If holds fail and the game would be short, the organiser decides whether to go ahead or cancel before anyone else is charged.
 7. After the game, admin enters **score**
 8. Players vote **Man of the Match**
 9. **MMR** for that group updates on win/draw/loss (opposition strength matters); MOTM gets a small extra bump. A new football member answers three join questions once; the “standard” answer seeds their starting rating in that group.
@@ -70,10 +70,10 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 **Built.** Create/edit group (including sport), invite by mobile (existing users get push; new numbers get an SMS download link), accept/decline, members, promote/kick, last-admin protection.
 
 ### Phase 3 — Games & lobby
-**Built.** Create/edit/cancel game, join/leave/waitlist, lock window, auto-cancel if min not met, MMR-balanced team pick.
+**Built.** Create/edit/cancel game, join/leave/waitlist, lock window, auto-cancel if not enough players have committed a card, organiser decision when holds fail, MMR-balanced team pick.
 
 ### Phase 4 — Payments
-**Built.** Stripe Connect Express (one treasurer per group), pay-to-join with Apple Pay / Google Pay / card, SubUp fee on top of pitch cost, refunds on leave (before lock) and cancel / auto-cancel. No cash or waive. See `docs/TEMP_CATEGORY_1_LAUNCH.md` for remaining Stripe ops (webhook URL, live keys).
+**Built.** Stripe Connect Express (one treasurer per group), pay-to-join with Apple Pay / Google Pay / card. The card is held (manual capture) and charged only when the game is confirmed at lock. Games more than 4 days before lock save the card and the hold is placed closer to lock. If declines would leave the game short, the organiser chooses to go ahead or cancel before any further capture. Pitch-only refunds apply after a payment has been captured. No cash or waive. See `docs/EAS_AND_SECRETS.md` for the Stripe webhook events to enable.
 
 ### Phase 5 — Results & MMR
 **Built.** Admin score entry, MOTM voting, history and profile stats. Since 1.0.4 (migration `037`) the rating is **per group** (`group_members.mmr`), not one number on the profile. Football join questions (attack, fitness, standard) ship with that migration. Other sports skip the questions. Migration `038` keeps the bigger K factor until the group has a longer rated history, and allows a 12-hour lock.

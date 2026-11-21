@@ -14,8 +14,8 @@ export function LockHoursSelector({ value, onChange }: LockHoursSelectorProps) {
     <View className="w-full gap-2">
       <Text className="font-sans-bold text-xs uppercase tracking-wider text-muted">Games lock before kickoff</Text>
       <Text className="font-sans text-xs text-muted">
-        Players can join or leave until this long before kickoff. If you still don’t have the minimum, the game is
-        cancelled and the pitch money is refunded.
+        Players can join or leave until this long before kickoff. Your card is only charged once the game is confirmed.
+        If not enough players are in, the game is cancelled and nobody is charged.
       </Text>
       <View className="w-full flex-row rounded-2xl bg-white p-1">
         {LOCK_HOURS_OPTIONS.map((option) => {

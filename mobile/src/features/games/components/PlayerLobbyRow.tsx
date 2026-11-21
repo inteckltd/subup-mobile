@@ -31,8 +31,12 @@ function paymentBadge(status: GamePlayerModel['paymentStatus']): { label: string
   switch (status) {
     case 'paid':
       return { label: 'PAID', bg: 'rgba(3,36,136,0.1)', color: colors.primary };
+    case 'authorized':
+      return { label: 'HELD', bg: 'rgba(3,36,136,0.1)', color: colors.primary };
+    case 'card_saved':
+      return { label: 'CARD SAVED', bg: '#EEF2FF', color: colors.primary };
     case 'pending':
-      return { label: 'PAYING', bg: '#FEF3C7', color: '#B45309' };
+      return { label: 'JOINING', bg: '#FEF3C7', color: '#B45309' };
     case 'refunded':
       return { label: 'REFUNDED', bg: '#F3F4F6', color: '#6B7280' };
     default:

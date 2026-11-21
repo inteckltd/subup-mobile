@@ -47,10 +47,14 @@ Deno.serve(async (req) => {
 
     const { data: game } = await service
       .from('games')
-      .select('teams_picked_at, treasurer_payout_id, cancel_if_min_not_met_hours, starts_at')
+      .select('teams_picked_at, treasurer_payout_id, cancel_if_min_not_met_hours, starts_at, shortfall_at')
       .eq('id', gameId)
       .maybeSingle();
-    if (game?.teams_picked_at || game?.treasurer_payout_id) {
+    const lockHours = game?.cancel_if_min_not_met_hours ?? 0;
+    const lockStarted = game?.starts_at
+      ? new Date(game.starts_at).getTime() - lockHours * 60 * 60 * 1000 <= Date.now()
+      : false;
+    if (game?.teams_picked_at || game?.treasurer_payout_id || game?.shortfall_at || (lockStarted && !player.is_waitlisted)) {
       return jsonResponse({ ok: false, error: "You can't leave within the lock window" }, 400);
     }
 
@@ -75,6 +79,21 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (
+      (player.payment_status === 'pending' || player.payment_status === 'authorized' || player.payment_status === 'card_saved')
+      && player.stripe_payment_intent_id
+    ) {
+      try {
+        await stripe.paymentIntents.cancel(player.stripe_payment_intent_id);
+      } catch (cancelError) {
+        const message = cancelError instanceof Error ? cancelError.message : String(cancelError);
+        if (!/canceled|cannot be canceled/i.test(message)) {
+          await captureEdgeError('leave-paid-game', cancelError);
+          return jsonResponse({ ok: false, error: "Couldn't release the card hold. Please try again." }, 400);
+        }
+      }
+    }
+
     const anon = createAnonClient(req);
     const { data: promotedUserId, error: leaveError } = await anon.rpc('leave_game', { p_game_id: gameId });
     if (leaveError) {
@@ -83,15 +102,6 @@ Deno.serve(async (req) => {
         return jsonResponse({ ok: false, error: message }, 400);
       }
       throw leaveError;
-    }
-
-    if (player.payment_status === 'pending' && player.stripe_payment_intent_id) {
-      try {
-        await stripe.paymentIntents.cancel(player.stripe_payment_intent_id);
-      } catch (cancelError) {
-        const message = cancelError instanceof Error ? cancelError.message : String(cancelError);
-        if (!/canceled|cannot be canceled/i.test(message)) throw cancelError;
-      }
     }
 
     return jsonResponse({ ok: true, promotedUserId: promotedUserId ?? null });

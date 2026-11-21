@@ -24,16 +24,19 @@ export function TermsCopy() {
         the pitch. You agree to treat other players with respect and not to misuse invites, notifications, or SMS.
       </Para>
       <Para>
-        Paid games are joined with Apple Pay, Google Pay, or card via Stripe. You pay the pitch cost the organiser set
-        plus a SubUp service fee shown before you confirm (currently 10% of the pitch cost, minimum 50p; £0 for free
-        games). The organiser (the group treasurer) receives the pitch amount through Stripe Connect; SubUp retains the
-        service fee. There is no cash or waived entry. Each group sets a lock window of 12, 24, 48, or 72 hours before
-        kickoff. If you leave before that window, the pitch is refunded; the SubUp service fee is not. After the
-        lock window you cannot leave a confirmed spot. If a game is cancelled before kickoff — including automatic
-        cancellation when too few paid players have joined — the pitch is refunded and the SubUp service fee is not.
-        After kickoff the game cannot be cancelled and payments are not refunded. The treasurer is paid the pitch total
-        after the game starts; that usually reaches their bank in around two business days. SubUp retains the service
-        fee when you pay.
+        Paid games are joined with Apple Pay, Google Pay, or card via Stripe. You agree that SubUp may save a reference
+        to your card and place a hold for the pitch cost the organiser set plus a SubUp service fee shown before you
+        confirm (currently 10% of the pitch cost, minimum 50p; £0 for free games). If the game locks more than 4 days
+        after you join, we save the card and place the hold closer to lock, including when you are not in the app. You
+        are only charged if the game is confirmed. The organiser (the group treasurer) receives the pitch amount through
+        Stripe Connect; SubUp retains the service fee. There is no cash or waived entry. Each group sets a lock window
+        of 12, 24, 48, or 72 hours before kickoff. If you leave before that window, the hold is released and you are not
+        charged. After the lock window you cannot leave a confirmed spot. If a game is cancelled before it is confirmed,
+        including when too few players have committed a card, holds are released and you are not charged. If the
+        organiser confirms the game and it is later cancelled before kickoff, the pitch is refunded and the SubUp
+        service fee is not. After kickoff the game cannot be cancelled and payments are not refunded. The treasurer is
+        paid the pitch total after the game starts; that usually reaches their bank in around two business days. SubUp
+        retains the service fee when the game is confirmed and your card is charged.
       </Para>
       <Para>
         Ratings are kept separately for each group you join. When you join a group you answer a few short questions
@@ -68,7 +71,7 @@ export function PrivacyCopy() {
       <Para>
         We process: your name, UK mobile number (your login), optional email, optional profile photo, group and game
         activity, scores, votes, per-group ratings, your answers to the join questions (playing style, fitness and standard
-        played, used to set your starting rating and balance teams), push tokens, payment records (status, amounts, Stripe identifiers), and
+        played, used to set your starting rating and balance teams), push tokens, payment records (status, amounts, Stripe identifiers, and a Stripe customer reference so we can place a hold and charge your saved card when a game is confirmed, including when you are not in the app), and
         device diagnostics if you enable error reporting. Legal bases: contract (to run your account, groups, and
         payments), legitimate interests (security, abuse prevention, product reliability), and legal obligation where we
         must keep records.

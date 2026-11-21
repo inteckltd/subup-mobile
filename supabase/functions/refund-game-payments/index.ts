@@ -4,6 +4,7 @@
 
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
+import { cancelUncapturedPayments } from '../_shared/lock-runner.ts';
 import { createAnonClient, getStripe, jsonResponse, refundSucceededPayments, requireUserId } from '../_shared/stripe.ts';
 
 Deno.serve(async (req) => {
@@ -50,6 +51,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: true, refunded: 0, skipped: 'started' });
     }
     const refunded = await refundSucceededPayments(service, stripe, gameId);
+    await cancelUncapturedPayments(service, stripe, gameId);
     return jsonResponse({ ok: true, refunded });
   } catch (error) {
     await captureEdgeError('refund-game-payments', error);

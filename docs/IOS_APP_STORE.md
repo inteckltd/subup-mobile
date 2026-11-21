@@ -35,7 +35,7 @@ Login is UK mobile + password (not email). Review demo login is kept privately b
 
 Apple Pay: used via Stripe Payment Sheet when joining a paid game. Not a standalone Wallet or Settings screen. Merchant ID merchant.com.inteck.pitchin.
 
-After sign-in: open group “Review Kickabout” → open paid game “Paid review kickabout” → tap “Pay £… to join”. The sheet offers Apple Pay and card. PassKit is from the Stripe iOS SDK; we do use it.
+After sign-in: open group “Review Kickabout” → open paid game “Paid review kickabout” → tap “Hold £… to join” (or “Save card to join” if lock is more than 4 days away). The sheet offers Apple Pay and card. The card is held and charged only if the game is confirmed. PassKit is from the Stripe iOS SDK; we do use it.
 ```
 
 Before submitting, the review user must have Stripe Connect charges + transfers enabled (Group → Payouts), then re-run `seed_app_review_user.sql` so the paid game exists and the reviewer is **not** already a player on it.

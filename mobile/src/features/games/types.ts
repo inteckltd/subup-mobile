@@ -54,6 +54,11 @@ export type GameDetailModel = {
   feeCents: number;
   totalCents: number;
   payoutsReady: boolean;
+  spotsCommitted: number;
+  spotsRoster: number;
+  shortfallAt: string | null;
+  shortfallConfirmedAt: string | null;
+  myNeedsCardConfirm: boolean;
 };
 
 export type MotmCandidateModel = {

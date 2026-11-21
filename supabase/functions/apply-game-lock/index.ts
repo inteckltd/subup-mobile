@@ -10,6 +10,7 @@
 
 import { timingSafeEqual } from '../_shared/crypto.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
+import { cancelUncapturedPayments, placeDueOffSessionHolds, settleLocksBeforeSql } from '../_shared/lock-runner.ts';
 import { getStripe, payoutDueTreasurerGames, refundSucceededPayments } from '../_shared/stripe.ts';
 import { createServiceClient, withJwtSkewRetry } from '../_shared/supabase.ts';
 
@@ -107,6 +108,17 @@ Deno.serve(async (req) => {
     }
   }
 
+  if (Deno.env.get('STRIPE_SECRET_KEY')) {
+    const stripe = getStripe();
+    try {
+      await placeDueOffSessionHolds(serviceClient, stripe);
+      await settleLocksBeforeSql(serviceClient, stripe);
+    } catch (holdError) {
+      console.error('[apply-game-lock] hold/capture sweep failed', holdError);
+      await captureEdgeError('apply-game-lock', holdError);
+    }
+  }
+
   const { data: processed, error: lockError } = await withJwtSkewRetry(() =>
     serviceClient.rpc('apply_game_lock_window'),
   );
@@ -125,6 +137,7 @@ Deno.serve(async (req) => {
       if (row.action !== 'cancelled') continue;
       try {
         await refundSucceededPayments(serviceClient, stripe, row.game_id);
+        await cancelUncapturedPayments(serviceClient, stripe, row.game_id);
       } catch (refundError) {
         console.error('[apply-game-lock] refund after cancel failed', refundError);
         await captureEdgeError('apply-game-lock', refundError);
@@ -138,14 +151,10 @@ Deno.serve(async (req) => {
     }
   }
 
-  if (gameIds.length === 0) {
-    return jsonResponse({ ok: true, gamesProcessed: 0, notified: 0, pushed: 0 });
-  }
-
   const { data: notifications, error: notificationsError } = await serviceClient
     .from('notifications')
     .select('user_id, title, body, data')
-    .in('type', ['game_cancelled', 'game_updated'])
+    .in('type', ['game_cancelled', 'game_updated', 'game_shortfall', 'payment'])
     .gte('created_at', new Date(Date.now() - 15 * 60 * 1000).toISOString());
 
   if (notificationsError) {
@@ -156,7 +165,9 @@ Deno.serve(async (req) => {
 
   const rows = ((notifications ?? []) as NotificationRow[]).filter((row) => {
     const type = row.data?.type;
-    return (type === 'game_cancelled' || type === 'team_assigned') && gameIds.includes(String(row.data?.gameId ?? ''));
+    const gameId = String(row.data?.gameId ?? '');
+    if (type === 'game_shortfall' || type === 'card_confirm' || type === 'card_declined') return true;
+    return (type === 'game_cancelled' || type === 'team_assigned') && gameIds.includes(gameId);
   });
   if (rows.length === 0) {
     return jsonResponse({ ok: true, gamesProcessed: gameIds.length, notified: 0, pushed: 0 });

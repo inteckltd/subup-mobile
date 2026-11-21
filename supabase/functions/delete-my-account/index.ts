@@ -8,6 +8,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { captureEdgeError } from '../_shared/sentry.ts';
+import { getStripe } from '../_shared/stripe.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -68,6 +69,23 @@ Deno.serve(async (req) => {
 
   const userId = userData.user.id;
 
+  const serviceClient = createClient(supabaseUrl, serviceRoleKey);
+  if (Deno.env.get('STRIPE_SECRET_KEY')) {
+    try {
+      const stripe = getStripe();
+      const { data: openIntents } = await serviceClient.rpc('list_user_open_payment_intents', { p_user_id: userId });
+      for (const row of (openIntents ?? []) as { stripe_payment_intent_id: string }[]) {
+        if (!row.stripe_payment_intent_id) continue;
+        await stripe.paymentIntents.cancel(row.stripe_payment_intent_id).catch((cancelError) => {
+          console.error('[delete-my-account] cancel hold failed', cancelError);
+        });
+      }
+    } catch (stripeError) {
+      console.error('[delete-my-account] could not release holds', stripeError);
+      await captureEdgeError('delete-my-account', stripeError);
+    }
+  }
+
   const { error: rpcError } = await callerClient.rpc('delete_my_account');
   if (rpcError) {
     const message = rpcError.message ?? '';
@@ -79,7 +97,6 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, error: "Couldn't delete your account. Please try again." }, 500);
   }
 
-  const serviceClient = createClient(supabaseUrl, serviceRoleKey);
   await emptyFolder(serviceClient, 'avatars', userId);
   await emptyFolder(serviceClient, 'group-covers', userId);
 
