@@ -30,5 +30,5 @@ Never commit `.env` or a service-role key. Never run seed SQL on production.
 - [Android Play Store](docs/ANDROID_PLAY_STORE.md)
 - [Legal / support site](site/README.md) — Terms, Privacy, and the store support URL
 - [Brand](docs/BRAND.md) — colours, type, logo brief for marketing
-- [Category 1 — required before launch](docs/TEMP_CATEGORY_1_LAUNCH.md)
+- [Category 1 — leftover launch work](docs/TEMP_CATEGORY_1_LAUNCH.md)
 - [Category 2 — future features](docs/TEMP_CATEGORY_2_FUTURE.md)

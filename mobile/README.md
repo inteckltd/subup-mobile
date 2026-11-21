@@ -25,6 +25,6 @@ EXPO_PUBLIC_SENTRY_DSN=              # optional
 - [Security](../docs/SECURITY.md) — RLS, rate limits, phone confirm
 - [EAS and secrets](../docs/EAS_AND_SECRETS.md) — Twilio, cron Vault, function deploy
 - [iOS](../docs/IOS_APP_STORE.md) · [Android](../docs/ANDROID_PLAY_STORE.md)
-- [Launch remaining](../docs/TEMP_CATEGORY_1_LAUNCH.md)
+- [Leftover launch work](../docs/TEMP_CATEGORY_1_LAUNCH.md)
 
 **Do not** run seed SQL on production. Never commit a service-role key.

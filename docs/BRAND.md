@@ -82,23 +82,23 @@ From `mobile/src/theme/tokens.ts`. Do not invent a second palette.
 
 ## Logo — what we need from you
 
-The header lockup is in `mobile/assets/images/subup-logo.png` (cyan on transparent). Store icon is still a placeholder.
+The header lockup is in `mobile/assets/images/subup-logo.png` (cyan on transparent). The store icon is the navy field with the cyan squad mark (`mobile/assets/icon.png`). It is not the old Expo construction-grid placeholder. The same mark is the Android adaptive foreground and the splash symbol.
 
-**Still needed for launch**
+**Still useful outside the app binary**
 
-1. **App icon** — 1024×1024, no rounded-rect baked in (iOS applies the mask). Readable at 60pt and 29pt.
-2. **Android adaptive icon** — foreground on transparent, safe zone in the centre ~66%. Background can be flat `#032488`.
-3. **Symbol only** — works in a notification (24pt) and as a favicon.
-4. **On navy** and **on cyan** and **on `#FEFEFD`** versions (full colour + single-colour).
-5. **Splash** — symbol centred on `#FEFEFD`, or symbol on `#032488` if you prefer a navy launch.
-6. **Store** — 1024×500 Play feature graphic; iPhone 6.7" / 6.5" screenshot frames if you do those too.
+1. **App icon** — already in the app (`mobile/assets/icon.png`). A 1024×1024 master with no rounded-rect baked in is what iOS masks.
+2. **Android adaptive icon** — already in the app. Foreground on transparent, safe zone in the centre ~66%. Background is flat `#032488`.
+3. **Symbol only** — the splash and monochrome assets are the mark. A small notification (24pt) and favicon export may still be wanted for marketing.
+4. **On navy** and **on cyan** and **on `#FEFEFD`** versions (full colour + single-colour), if marketing needs files the app does not ship.
+5. **Splash** — symbol centred on `#FEFEFD` is already `mobile/assets/splash-icon.png`.
+6. **Store** — 1024×500 Play feature graphic; iPhone 6.7" / 6.5" screenshot frames. Not in this repo.
 
 **Direction (not a brief to copy blindly)**
 
 - Private squad, not a stadium brand
 - Cyan is the spark; navy is the field
 - Avoid clip-art balls, trophy piles, or WhatsApp-green clones (`#25D366`)
-- Avoid the Expo construction-grid mark still in `mobile/assets/icon.png`
+- The old Expo construction-grid mark is gone from `mobile/assets/icon.png`. Do not bring it back.
 
 **File formats:** SVG + PDF for print/web; PNG @1x/2x/3x for the app. No drop shadows that break at small sizes.
 
@@ -115,9 +115,9 @@ Auth screens use warm, real-sport stills (`mobile/assets/images/auth-hero.jpg`).
 | File | Notes |
 |------|--------|
 | `mobile/assets/images/subup-logo.png` | Header / auth lockup (cyan, transparent) |
-| `mobile/assets/icon.png` | Placeholder — replace |
-| `mobile/assets/splash-icon.png` | Placeholder splash |
-| `mobile/assets/android-icon-*.png` | Adaptive layers; background now `#032488` |
+| `mobile/assets/icon.png` | Store icon: navy field, cyan squad mark |
+| `mobile/assets/splash-icon.png` | Same mark, navy on `#FEFEFD` |
+| `mobile/assets/android-icon-*.png` | Adaptive layers; background `#032488`, foreground and monochrome are the squad mark |
 | `mobile/src/theme/tokens.ts` | Colours the code actually uses |
 
 ---

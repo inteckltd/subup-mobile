@@ -15,13 +15,13 @@ npx eas-cli@latest submit --platform android --profile production
 
 ## Play Console
 
-Hosted copy lives in [`site/`](../site/). Until the marketing site exists, publish that folder (see [`site/README.md`](../site/README.md)) and paste:
+The marketing and legal site is live at [https://www.subupapp.co.uk](https://www.subupapp.co.uk) (Vercel, separate repo `inteckltd/subup-website`). Paste:
 
-- **Privacy Policy URL**: `https://YOUR-HOST/privacy.html`
-- Store listing website / support: `https://YOUR-HOST/`
+- **Privacy Policy URL**: `https://www.subupapp.co.uk/privacy`
+- Store listing website / support: `https://www.subupapp.co.uk/`
 - Data safety form (same processors as iOS: Supabase, Twilio, Expo, Sentry)
 - Short / full description, feature graphic (1024×500), phone screenshots
 - Target API level as required by Play
-- `INVITE_APP_URL` can point at the Play listing or a landing page
+- `INVITE_APP_URL` falls back to `https://www.subupapp.co.uk` when unset (`mobile/src/lib/env.ts` and the invite SMS function). An in-repo copy of the pages is in [`site/`](../site/).
 
 Remaining store polish: [TEMP_CATEGORY_1_LAUNCH.md](TEMP_CATEGORY_1_LAUNCH.md).
