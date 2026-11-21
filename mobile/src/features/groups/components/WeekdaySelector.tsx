@@ -10,14 +10,17 @@ type WeekdaySelectorProps = {
 /** Single-select day-of-week chip row for a group's regular meetup day. */
 export function WeekdaySelector({ value, onChange }: WeekdaySelectorProps) {
   return (
-    <View className="w-full flex-row justify-between gap-1.5">
+    <View className="w-full flex-row flex-wrap gap-1.5">
       {WEEKDAYS.map((day) => {
         const selected = day.value === value;
         return (
           <Pressable
             key={day.value}
             onPress={() => onChange(day.value)}
-            className={`flex-1 items-center rounded-xl py-2.5 ${selected ? 'bg-primary' : 'bg-background'}`}
+            accessibilityRole="button"
+            accessibilityLabel={day.name}
+            accessibilityState={{ selected }}
+            className={`min-h-11 min-w-[44px] grow basis-[12%] items-center justify-center rounded-xl px-1 py-2.5 ${selected ? 'bg-primary' : 'bg-background'}`}
           >
             <Text className={`font-sans-bold text-xs ${selected ? 'text-white' : 'text-muted'}`}>{day.label}</Text>
           </Pressable>

@@ -44,7 +44,7 @@ CORS is `*` while the only client is native. Lock this down if you add a browser
 
 ## Checklist on the live project
 
-- [ ] Migrations through `026` applied
+- [ ] Migrations through `038` applied on the live project (the repo ends at `038_rating_k_window_and_12h_lock.sql`; this file cannot see the hosted database)
 - [ ] Dashboard auth rate limits left on
 - [ ] Confirm phone **off**
 - [ ] Twilio not in trial for production SMS

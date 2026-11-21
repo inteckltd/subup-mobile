@@ -52,7 +52,13 @@ export function SetupChecklist({ progress, onDismiss, onCreateGroup, onInvite, o
           <Text className="font-sans-bold text-sm text-ink">Get your squad going</Text>
           <Text className="font-sans text-xs text-muted">Three steps to organise your first game. You can skip this anytime.</Text>
         </View>
-        <Pressable onPress={onDismiss} hitSlop={8} className="h-8 w-8 items-center justify-center rounded-full bg-background">
+        <Pressable
+          onPress={onDismiss}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
+          className="h-11 w-11 items-center justify-center rounded-full bg-background"
+        >
           <Ionicons name="close" size={16} color={colors.muted} />
         </Pressable>
       </View>

@@ -36,7 +36,7 @@ function paymentBadge(status: GamePlayerModel['paymentStatus']): { label: string
     case 'card_saved':
       return { label: 'CARD SAVED', bg: '#EEF2FF', color: colors.primary };
     case 'pending':
-      return { label: 'PAYING', bg: '#FEF3C7', color: '#B45309' };
+      return { label: 'JOINING', bg: '#FEF3C7', color: '#B45309' };
     case 'refunded':
       return { label: 'REFUNDED', bg: '#F3F4F6', color: '#6B7280' };
     default:
@@ -126,7 +126,7 @@ export function PlayerLobbyRow({
           <Text className="font-sans-bold text-sm text-ink" numberOfLines={1}>
             {player.name}
           </Text>
-          <Text className="font-sans text-[10px] text-muted">{formatGroupRating(player.mmr, player.ratedGames)}</Text>
+          <Text className="font-sans text-xs text-muted">{formatGroupRating(player.mmr, player.ratedGames)}</Text>
         </View>
       </View>
       <View className="flex-row items-center gap-1.5">

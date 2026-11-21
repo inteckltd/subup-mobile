@@ -31,7 +31,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
         <TextInput
           ref={ref}
           className="flex-1 font-sans-bold text-base text-ink"
-          placeholderTextColor="#D1D5DB"
+          placeholderTextColor={colors.muted}
           secureTextEntry={hidden}
           multiline={multiline}
           textAlignVertical={multiline ? 'top' : undefined}
@@ -44,7 +44,12 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
           {...inputProps}
         />
         {isPassword ? (
-          <Pressable onPress={() => setRevealed((prev) => !prev)} hitSlop={8}>
+          <Pressable
+            onPress={() => setRevealed((prev) => !prev)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={revealed ? 'Hide password' : 'Show password'}
+          >
             <Ionicons name={revealed ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.muted} />
           </Pressable>
         ) : null}

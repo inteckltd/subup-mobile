@@ -1,40 +1,34 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-  formatCountdown,
   formatGbp,
   formatLobbyDateTime,
   formatLockDeadline,
+  gameEndsAt,
   hasGameEnded,
   isInsideLockWindow,
   lockDeadlineAt,
 } from '../../../src/lib/format';
+import { useRefreshAt } from '../../../src/lib/useRefreshAt';
 import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButton';
 import { EmptyState } from '../../../src/features/home/components/EmptyState';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
+import { CountdownText } from '../../../src/features/games/components/CountdownText';
+import { GameLobbyActions } from '../../../src/features/games/components/GameLobbyActions';
 import { PlayerLobbyRow } from '../../../src/features/games/components/PlayerLobbyRow';
+import { getGroupJoinToken } from '../../../src/features/group-details/api';
+import { groupJoinUrl } from '../../../src/features/group-details/joinLink';
+import { buildWhosPlayingMessage, sharePlainText } from '../../../src/features/group-details/shareInvite';
 import { TeamBoard, TeamDragOverlay, useTeamDrag } from '../../../src/features/games/components/TeamBoard';
 import { useCancelGame, useConfirmShortGame, useGameDetail, useGameDetailRefresh, useGamePlayers, useJoinLeaveGame, useMoveGamePlayerTeam } from '../../../src/features/games/hooks';
 import { teamColorById } from '../../../src/features/games/schemas';
 import type { GamePlayerModel } from '../../../src/features/games/types';
 import type { PaymentStatus } from '../../../src/types/database';
 import { colors } from '../../../src/theme/tokens';
-
-function useNow(intervalMs = 1000) {
-  const [now, setNow] = useState(() => new Date());
-  useFocusEffect(
-    useCallback(() => {
-      setNow(new Date());
-      const id = setInterval(() => setNow(new Date()), intervalMs);
-      return () => clearInterval(id);
-    }, [intervalMs]),
-  );
-  return now;
-}
 
 function PlayerList({ players, motmUserId }: { players: GamePlayerModel[]; motmUserId?: string | null }) {
   return (
@@ -86,7 +80,6 @@ function confirmLeaveGame(input: {
 export default function GameDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
-  const now = useNow();
 
   const gameQuery = useGameDetail(id);
   const playersQuery = useGamePlayers(id);
@@ -95,6 +88,8 @@ export default function GameDetailsScreen() {
   const { cancel, pending: cancelling, error: cancelError } = useCancelGame(id);
   const { confirmShort, pending: confirmingShort, error: shortError } = useConfirmShortGame(id);
   const { move, error: moveError } = useMoveGamePlayerTeam(id);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [lobbyActionError, setLobbyActionError] = useState<string | null>(null);
 
   const canDrag =
     !!gameQuery.data?.isAdmin &&
@@ -108,6 +103,14 @@ export default function GameDetailsScreen() {
     [move],
   );
   const drag = useTeamDrag(canDrag, handleMove);
+  const preview = gameQuery.data;
+  const previewLockHours = preview?.cancelIfMinNotMetHours ?? 24;
+  const now = useRefreshAt([
+    preview ? lockDeadlineAt(preview.startsAt, previewLockHours).toISOString() : null,
+    preview?.startsAt ?? null,
+    preview ? gameEndsAt(preview.startsAt, preview.durationMinutes).toISOString() : null,
+    preview?.scoredAt ? new Date(preview.scoredAt).getTime() + 24 * 60 * 60 * 1000 : null,
+  ]);
 
   if (gameQuery.isPending) {
     return (
@@ -167,7 +170,7 @@ export default function GameDetailsScreen() {
   const leaveLocked = insideLock && game.hasJoined && !game.isWaitlisted;
   const isCompleted = game.status === 'completed';
   const isFinished = game.status === 'cancelled' || isCompleted;
-  const hasEnded = !isFinished && hasGameEnded(game.startsAt, game.durationMinutes);
+  const hasEnded = !isFinished && hasGameEnded(game.startsAt, game.durationMinutes, now);
   const motmOpen =
     isCompleted &&
     !game.isWaitlisted &&
@@ -176,6 +179,39 @@ export default function GameDetailsScreen() {
     !!game.scoredAt &&
     new Date(game.scoredAt).getTime() + 24 * 60 * 60 * 1000 > now.getTime();
 
+  const onSameAgain = () => {
+    router.push(`/games/create?repeatId=${game.id}`);
+  };
+
+  const onSharePlayers = async () => {
+    setLobbyActionError(null);
+    setShareBusy(true);
+    try {
+      let joinUrl: string | undefined;
+      if (game.isAdmin) {
+        const result = await getGroupJoinToken(game.groupId);
+        if (result.token) joinUrl = groupJoinUrl(result.token);
+      }
+      const playing = players.filter((player) => !player.isWaitlisted && player.paymentStatus !== 'refunded');
+      await sharePlainText(
+        buildWhosPlayingMessage({
+          title: game.title || game.groupName,
+          when: formatLobbyDateTime(game.startsAt),
+          venueName: game.venueName,
+          venueAddress: game.venueAddress,
+          confirmedNames: playing.map((player) => player.name),
+          spotsLeft: Math.max(game.maxPlayers - game.spotsTaken, 0),
+          joinUrl,
+          playersUnavailable: playersQuery.isError,
+        }),
+      );
+    } catch {
+      setLobbyActionError("Couldn't open the share sheet. Please try again.");
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
   return (
     <View className="flex-1 bg-background">
       <SafeAreaView edges={['top']} className="bg-white">
@@ -183,11 +219,13 @@ export default function GameDetailsScreen() {
           <Pressable
             onPress={() => router.back()}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
             className="h-10 w-10 items-center justify-center rounded-full bg-background"
           >
             <Ionicons name="chevron-back" size={18} color={colors.ink} />
           </Pressable>
-          <Text className="font-sans-bold text-lg text-ink">Game Lobby</Text>
+          <Text className="font-sans-bold text-lg text-ink">Game</Text>
           {gameQuery.data?.isAdmin && gameQuery.data.status !== 'cancelled' && gameQuery.data.status !== 'completed' ? (
             <Pressable
               onPress={() => {
@@ -233,6 +271,8 @@ export default function GameDetailsScreen() {
                 Alert.alert('Manage game', undefined, options);
               }}
               hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Manage game"
               className="h-10 w-10 items-center justify-center rounded-full bg-background"
             >
               <Ionicons name="ellipsis-horizontal" size={18} color={colors.ink} />
@@ -272,10 +312,11 @@ export default function GameDetailsScreen() {
             <View className="gap-1">
               <View className="flex-row items-center justify-between rounded-2xl border border-border bg-background px-4 py-3">
                 <View>
-                  <Text className="font-sans-bold text-[10px] uppercase tracking-wider text-muted">Locks in</Text>
-                  <Text className="font-sans-bold text-lg text-ink">
-                    {formatCountdown(lockDeadlineAt(game.startsAt, lockHours).toISOString(), now)}
-                  </Text>
+                  <Text className="font-sans-bold text-xs uppercase tracking-wider text-muted">Locks in</Text>
+                  <CountdownText
+                    target={lockDeadlineAt(game.startsAt, lockHours).toISOString()}
+                    className="font-sans-bold text-lg text-ink"
+                  />
                 </View>
                 <Ionicons name="lock-closed-outline" size={18} color={colors.muted} />
               </View>
@@ -317,8 +358,8 @@ export default function GameDetailsScreen() {
           ) : (
             <View className="flex-row items-center justify-between rounded-2xl bg-ink p-4">
               <View>
-                <Text className="font-sans-bold text-[10px] uppercase tracking-wider text-white/60">Starts in</Text>
-                <Text className="font-sans-bold text-lg text-white">{formatCountdown(game.startsAt, now)}</Text>
+                <Text className="font-sans-bold text-xs uppercase tracking-wider text-white/60">Starts in</Text>
+                <CountdownText target={game.startsAt} className="font-sans-bold text-lg text-white" />
               </View>
               <View className="h-8 w-px bg-white/20" />
               <View className="items-end">
@@ -359,7 +400,7 @@ export default function GameDetailsScreen() {
             <Ionicons name="person-outline" size={16} color={colors.primary} style={{ marginTop: 2 }} />
             <View className="flex-1">
               <Text className="font-sans-bold text-sm text-ink">
-                Organized by {game.organizerName ?? 'a group admin'}
+                Organised by {game.organizerName ?? 'a group admin'}
               </Text>
               <Text className="font-sans text-xs text-muted">Group admin</Text>
             </View>
@@ -386,7 +427,7 @@ export default function GameDetailsScreen() {
           {!confirmed ? (
             <View className="gap-2">
               <View className="flex-row items-center justify-between">
-                <Text className="font-sans-bold text-sm text-ink">Spots Filled</Text>
+                <Text className="font-sans-bold text-sm text-ink">Spots filled</Text>
                 <Text className="font-sans-bold text-sm text-primary">
                   {game.spotsTaken}/{game.maxPlayers}
                 </Text>
@@ -403,6 +444,17 @@ export default function GameDetailsScreen() {
             </View>
           ) : null}
         </View>
+
+        <GameLobbyActions
+          showSameAgain={game.isAdmin}
+          onSameAgain={onSameAgain}
+          onSharePlayers={() => {
+            void onSharePlayers();
+          }}
+          shareBusy={shareBusy}
+          shareDisabled={playersQuery.isPending}
+          message={lobbyActionError}
+        />
 
         {isCompleted ? (
           <View className="w-full gap-3 rounded-3xl bg-white p-6">
@@ -492,10 +544,10 @@ export default function GameDetailsScreen() {
           <View className="flex-row items-start gap-3 rounded-2xl border border-[#FEF3C7] bg-[#FFFBEB] p-4">
             <Ionicons name="warning-outline" size={16} color="#92400E" style={{ marginTop: 1 }} />
             <View className="flex-1 gap-0.5">
-              <Text className="font-sans-bold text-xs text-[#92400E]">Below Minimum Players</Text>
-              <Text className="font-sans text-[10px] leading-4 text-[#B45309]">
-                This game needs {needed} more {needed === 1 ? 'player' : 'players'} by {formatLockDeadline(game.startsAt, lockHours)}{' '}
-                or it will be automatically cancelled.
+              <Text className="font-sans-bold text-xs text-[#92400E]">Short of the minimum</Text>
+              <Text className="font-sans text-xs leading-5 text-[#B45309]">
+                This game needs {needed} more {needed === 1 ? 'player' : 'players'} by {formatLockDeadline(game.startsAt, lockHours)}, or
+                it is cancelled and nobody is charged.
               </Text>
             </View>
           </View>
@@ -541,8 +593,8 @@ export default function GameDetailsScreen() {
           ) : (
             <>
               <View className="flex-row items-center justify-between px-1">
-                <Text className="font-sans-bold text-lg text-ink">Player List</Text>
-                <Text className="font-sans text-xs text-muted">{confirmedPlayers.length} Confirmed</Text>
+                <Text className="font-sans-bold text-lg text-ink">Players</Text>
+                <Text className="font-sans text-xs text-muted">{confirmedPlayers.length} confirmed</Text>
               </View>
               {players.length === 0 ? (
                 <EmptyState icon="people-outline" title="No one's joined yet" subtitle="Players who join this game will show up here." />
@@ -613,16 +665,20 @@ export default function GameDetailsScreen() {
             <PrimaryButton label="Game is full" disabled />
           ) : leaveLocked ? (
             <View className="items-center gap-1 py-2">
-              <View className="flex-row items-center gap-1.5">
+              <View className="flex-row items-center justify-center gap-1.5 px-2">
                 <Ionicons name="lock-closed" size={14} color={colors.muted} />
-                <Text className="font-sans-bold text-sm text-muted">Leave locked within {lockHours}h of kickoff</Text>
+                <Text className="shrink font-sans-bold text-sm text-muted">
+                  You can’t leave within {lockHours} hours of kickoff
+                </Text>
               </View>
             </View>
           ) : confirmed && !game.hasJoined ? (
             <View className="items-center gap-1 py-2">
-              <View className="flex-row items-center gap-1.5">
+              <View className="flex-row items-center justify-center gap-1.5 px-2">
                 <Ionicons name="lock-closed" size={14} color={colors.muted} />
-                <Text className="font-sans-bold text-sm text-muted">Joining is locked within {lockHours}h of kickoff</Text>
+                <Text className="shrink font-sans-bold text-sm text-muted">
+                  Joining closes {lockHours} hours before kickoff
+                </Text>
               </View>
             </View>
           ) : game.hasJoined ? (
@@ -644,7 +700,13 @@ export default function GameDetailsScreen() {
             <PrimaryButton label="Game cancelled" disabled />
           ) : (
             <View className="items-center gap-1 py-2">
-              <Text className="font-sans-bold text-sm text-muted">You can’t join this game</Text>
+              <Text className="text-center font-sans-bold text-sm text-muted">
+                {game.status === 'draft'
+                  ? "This game isn't open yet."
+                  : game.status === 'full'
+                    ? 'This game is full.'
+                    : "This game isn't open for joining."}
+              </Text>
             </View>
           )}
         </View>

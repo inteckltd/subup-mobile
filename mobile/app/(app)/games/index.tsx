@@ -10,6 +10,7 @@ import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { HomeHeader } from '../../../src/features/home/components/HomeHeader';
 import { GameCardSkeleton } from '../../../src/features/home/components/Skeleton';
 import { useMyGroups, useUpcomingGames } from '../../../src/features/home/hooks';
+import { playerTotalCents } from '../../../src/features/payments/fees';
 import { formatFullDateLabel, formatGbp, formatUkTime, londonDateKey } from '../../../src/lib/format';
 import { useAuth } from '../../../src/providers/AuthProvider';
 import { colors } from '../../../src/theme/tokens';
@@ -102,7 +103,10 @@ export default function GamesScreen() {
                         <Text className="font-sans text-xs text-ink">
                           {game.spotsTaken}/{game.maxPlayers} spots
                         </Text>
-                        <Text className="font-sans-bold text-xs text-primary">{formatGbp(game.priceCents)}</Text>
+                        <View className="flex-row items-center gap-3">
+                          {game.hasJoined ? <Text className="font-sans-bold text-xs text-primary">Joined</Text> : null}
+                          <Text className="font-sans-bold text-xs text-ink">{formatGbp(playerTotalCents(game.priceCents))}</Text>
+                        </View>
                       </View>
                     </Pressable>
                   );

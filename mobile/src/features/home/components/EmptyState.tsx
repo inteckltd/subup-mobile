@@ -20,8 +20,12 @@ export function EmptyState({ icon, title, subtitle, actionLabel, onPressAction }
       <Text className="text-center font-sans-bold text-sm text-ink">{title}</Text>
       <Text className="text-center font-sans text-xs text-muted">{subtitle}</Text>
       {actionLabel && onPressAction ? (
-        <Pressable onPress={onPressAction} className="mt-2 rounded-full bg-primary px-4 py-2">
-          <Text className="font-sans-bold text-xs text-white">{actionLabel}</Text>
+        <Pressable
+          onPress={onPressAction}
+          accessibilityRole="button"
+          className="mt-2 min-h-11 items-center justify-center rounded-full bg-primary px-5 py-3"
+        >
+          <Text className="font-sans-bold text-sm text-white">{actionLabel}</Text>
         </Pressable>
       ) : null}
     </View>

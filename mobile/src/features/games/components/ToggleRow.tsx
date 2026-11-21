@@ -31,12 +31,15 @@ export function ToggleRow({ icon, iconBg, iconColor, label, description, value, 
         </View>
         <View className="flex-1">
           <Text className="font-sans-bold text-sm text-ink">{label}</Text>
-          {description ? <Text className="font-sans text-[10px] text-muted">{description}</Text> : null}
+          {description ? <Text className="font-sans text-xs text-muted">{description}</Text> : null}
         </View>
       </View>
       <Pressable
         onPress={() => onChange(!value)}
         hitSlop={8}
+        accessibilityRole="switch"
+        accessibilityLabel={label}
+        accessibilityState={{ checked: value }}
         className="h-6 w-11 justify-center rounded-full p-1"
         style={{ backgroundColor: value ? colors.accent : '#E5E7EB', alignItems: value ? 'flex-end' : 'flex-start' }}
       >

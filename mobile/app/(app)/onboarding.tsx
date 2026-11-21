@@ -44,12 +44,15 @@ export default function OnboardingScreen() {
     return unsubscribe;
   }, [navigation, session?.user.id]);
 
-  async function finish(openCreateGroup: boolean) {
+  async function finish(next: 'home' | 'create-group' | 'notifications') {
     if (session?.user.id) await markExplainerSeen(session.user.id);
     if (router.canDismiss()) router.dismiss();
     else router.back();
-    if (openCreateGroup) {
+    if (next === 'create-group') {
       setTimeout(() => router.push('/create-group'), 0);
+    }
+    if (next === 'notifications') {
+      setTimeout(() => router.push('/notifications'), 0);
     }
   }
 
@@ -58,13 +61,15 @@ export default function OnboardingScreen() {
       <SafeAreaView edges={['top']} className="bg-background">
         <View className="w-full flex-row items-center justify-between px-4 py-4">
           <Pressable
-            onPress={() => void finish(false)}
+            onPress={() => void finish('home')}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
             className="h-10 w-10 items-center justify-center rounded-full bg-white"
           >
             <Ionicons name="close" size={18} color={colors.ink} />
           </Pressable>
-          <Pressable onPress={() => void finish(false)} hitSlop={8} className="px-3 py-2">
+          <Pressable onPress={() => void finish('home')} hitSlop={8} className="px-3 py-2">
             <Text className="font-sans-bold text-sm text-muted">Skip</Text>
           </Pressable>
         </View>
@@ -88,16 +93,20 @@ export default function OnboardingScreen() {
       </View>
 
       <View className="border-t border-border bg-white px-4 pt-4" style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
-        <PrimaryButton
-          label={last ? 'Get started' : 'Next'}
-          onPress={() => {
-            if (last) {
-              void finish(true);
-              return;
-            }
-            setPage((currentPage) => currentPage + 1);
-          }}
-        />
+        {last ? (
+          <View className="gap-2">
+            <PrimaryButton label="Create a group" onPress={() => void finish('create-group')} />
+            <Pressable
+              onPress={() => void finish('notifications')}
+              accessibilityRole="button"
+              className="min-h-11 items-center justify-center py-3"
+            >
+              <Text className="font-sans-bold text-base text-primary">I was invited</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <PrimaryButton label="Next" onPress={() => setPage((currentPage) => currentPage + 1)} />
+        )}
       </View>
     </View>
   );

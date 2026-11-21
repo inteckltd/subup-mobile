@@ -14,8 +14,8 @@ type NavItem = {
 
 const ITEMS: NavItem[] = [
   { key: 'home', label: 'Home', icon: 'home', href: '/' },
-  { key: 'groups', label: 'My Groups', icon: 'people-outline', href: '/groups' as Href },
-  { key: 'games', label: 'My Games', icon: 'calendar-outline', href: '/games' },
+  { key: 'groups', label: 'Groups', icon: 'people-outline', href: '/groups' as Href },
+  { key: 'games', label: 'Games', icon: 'calendar-outline', href: '/games' },
   { key: 'profile', label: 'Profile', icon: 'person-outline', href: '/profile' },
 ];
 
@@ -50,13 +50,13 @@ export function BottomNavBar({ activeKey }: BottomNavBarProps) {
               if (item.href === pathname) return;
               router.replace(item.href);
             }}
-            className="flex-1 items-center gap-1 px-1"
+            accessibilityRole="button"
+            accessibilityLabel={item.label}
+            accessibilityState={{ selected: isActive }}
+            className="min-h-11 flex-1 items-center justify-center gap-1 px-1 py-1"
           >
-            <Ionicons name={item.icon} size={20} color={isActive ? colors.ink : colors.muted} />
-            <Text
-              numberOfLines={1}
-              className={`font-sans${isActive ? '-bold' : ''} text-[10px] ${isActive ? 'text-ink' : 'text-muted'}`}
-            >
+            <Ionicons name={item.icon} size={22} color={isActive ? colors.ink : colors.muted} />
+            <Text className={`font-sans${isActive ? '-bold' : ''} text-xs ${isActive ? 'text-ink' : 'text-muted'}`}>
               {item.label}
             </Text>
             {isActive ? <View className="h-1 w-1 rounded-full bg-accent" /> : null}

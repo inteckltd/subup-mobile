@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useRef } from 'react';
-import { Pressable, RefreshControl, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, Text, View } from 'react-native';
 import { ScrollView, Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -25,18 +25,16 @@ export default function NotificationsScreen() {
   const { remove, error: deleteError } = useDeleteNotification();
   const rows = query.data ?? [];
   const error = inviteError || deleteError;
-  const hasMarkedRef = useRef(false);
-
-  const newIds = useMemo(() => {
-    if (!query.data) return new Set<string>();
-    return new Set(query.data.filter((row) => !row.readAt).map((row) => row.id));
-  }, [query.data]);
+  const [highlightedIds, setHighlightedIds] = useState<ReadonlySet<string> | null>(null);
+  const capturedRef = useRef(false);
 
   useEffect(() => {
-    if (query.isPending || query.isError || !query.data || hasMarkedRef.current || newIds.size === 0) return;
-    hasMarkedRef.current = true;
-    void markRead();
-  }, [query.data, query.isPending, query.isError, markRead, newIds]);
+    if (!query.isSuccess || !query.data || capturedRef.current) return;
+    capturedRef.current = true;
+    const unread = new Set(query.data.filter((row) => !row.readAt).map((row) => row.id));
+    setHighlightedIds(unread);
+    if (unread.size > 0) void markRead();
+  }, [query.isSuccess, query.data, markRead]);
 
   return (
     <View className="flex-1 bg-background">
@@ -45,6 +43,8 @@ export default function NotificationsScreen() {
           <Pressable
             onPress={() => router.back()}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
             className="h-10 w-10 items-center justify-center rounded-full bg-background"
           >
             <Ionicons name="chevron-back" size={18} color={colors.ink} />
@@ -58,22 +58,29 @@ export default function NotificationsScreen() {
         contentContainerStyle={{ padding: 20, paddingBottom: 48, gap: 12 }}
         refreshControl={<RefreshControl refreshing={query.isRefetching} onRefresh={() => query.refetch()} tintColor={colors.primary} />}
       >
-        {query.isError ? (
+        {query.isPending ? (
+          <View className="items-center py-16">
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : query.isError ? (
           <ErrorState message="Couldn't load notifications." onRetry={() => query.refetch()} />
-        ) : rows.length === 0 && !query.isPending ? (
+        ) : rows.length === 0 ? (
           <EmptyState icon="notifications-outline" title="No notifications" subtitle="Invites and game updates will show up here." />
         ) : (
-          rows.map((row) => (
-            <NotificationRow
-              key={row.id}
-              row={row}
-              isNew={newIds?.has(row.id) ?? !row.readAt}
-              pending={pending}
-              onAccept={accept}
-              onDecline={decline}
-              onDelete={remove}
-            />
-          ))
+          <>
+            <Text className="font-sans text-xs text-muted">Swipe left to remove.</Text>
+            {rows.map((row) => (
+              <NotificationRow
+                key={row.id}
+                row={row}
+                isNew={(highlightedIds?.has(row.id) ?? false) || !row.readAt}
+                pending={pending}
+                onAccept={accept}
+                onDecline={decline}
+                onDelete={remove}
+              />
+            ))}
+          </>
         )}
         {error ? <Text className="font-sans-medium text-sm text-danger">{error}</Text> : null}
       </ScrollView>
@@ -136,14 +143,30 @@ function NotificationRow({ row, isNew, pending, onAccept, onDecline, onDelete }:
             </Pressable>
           </View>
         ) : (row.data.type === 'motm_vote' || row.data.type === 'motm_result') && typeof row.data.gameId === 'string' ? (
-          <Pressable onPress={() => router.push(`/games/motm?gameId=${row.data.gameId as string}`)}>
-            <Text className="font-sans-bold text-xs text-primary">
-              {row.data.type === 'motm_vote' ? 'Vote for MOTM' : 'See MOTM'}
+          <Pressable
+            onPress={() => router.push(`/games/motm?gameId=${row.data.gameId as string}`)}
+            accessibilityRole="button"
+            className="min-h-11 justify-center"
+          >
+            <Text className="font-sans-bold text-sm text-primary">
+              {row.data.type === 'motm_vote' ? 'Vote for Man of the Match' : 'See Man of the Match'}
             </Text>
           </Pressable>
+        ) : row.data.type === 'score_reminder' && typeof row.data.gameId === 'string' ? (
+          <Pressable
+            onPress={() => router.push(`/games/enter-score?gameId=${row.data.gameId as string}`)}
+            accessibilityRole="button"
+            className="min-h-11 justify-center"
+          >
+            <Text className="font-sans-bold text-sm text-primary">Enter the score</Text>
+          </Pressable>
         ) : typeof row.data.gameId === 'string' ? (
-          <Pressable onPress={() => router.push(`/games/${row.data.gameId as string}`)}>
-            <Text className="font-sans-bold text-xs text-primary">View game</Text>
+          <Pressable
+            onPress={() => router.push(`/games/${row.data.gameId as string}`)}
+            accessibilityRole="button"
+            className="min-h-11 justify-center"
+          >
+            <Text className="font-sans-bold text-sm text-primary">View game</Text>
           </Pressable>
         ) : null}
       </View>

@@ -10,19 +10,19 @@ Bundle ID: `com.inteck.subup` (`mobile/app.json`). Encryption export: `ITSAppUse
 
 ## App Store Connect
 
-Hosted copy lives in [`site/`](../site/). Until the marketing site exists, publish that folder (see [`site/README.md`](../site/README.md)) and paste:
+The marketing and legal site is live at [https://www.subupapp.co.uk](https://www.subupapp.co.uk) (Vercel, separate repo `inteckltd/subup-website`). Paste:
 
-- **Support URL** / Marketing URL: `https://YOUR-HOST/` (`index.html`)
-- **Privacy Policy URL**: `https://YOUR-HOST/privacy.html`
-- Terms of Use (optional): `https://YOUR-HOST/terms.html`
+- **Support URL** / Marketing URL: `https://www.subupapp.co.uk/`
+- **Privacy Policy URL**: `https://www.subupapp.co.uk/privacy`
+- Terms of Use: `https://www.subupapp.co.uk/terms`
 
-Stores reject in-app-only legal copy.
+An in-repo copy of the legal pages still lives in [`site/`](../site/) (see [`site/README.md`](../site/README.md)). Stores reject in-app-only legal copy.
 
 - Subtitle, description, keywords
 - Screenshots: 6.7" and 6.5" iPhone (and iPad if you keep `supportsTablet`)
 - Age rating / no kids-directed content
 - Privacy Nutrition Labels aligned with [legal copy](../mobile/src/features/legal/copy.tsx) and [SECURITY.md](SECURITY.md) (mobile, optional email, photos, diagnostics, Twilio, Supabase, Expo, Sentry)
-- Review notes + demo account (see ignored `supabase/seed_app_review_user.sql` — do not run on production casually)
+- Review notes. Review demo login is kept privately by the owner (not in this repo). The ignored `supabase/seed_app_review_user.sql` must not be run on production casually, and must not be committed with a password.
 
 ### Guideline 2.1 — Apple Pay / PassKit
 
@@ -31,11 +31,11 @@ The binary includes PassKit because `@stripe/stripe-react-native` links `StripeA
 Apple cannot find it on the review login if the only seeded game is free (or the reviewer is already joined). Paste this into Review Notes on every submission, and reply with the same text if App Review asks:
 
 ```
-Login is UK mobile + password (not email). Username 07700900000, password PitchInReview2026!. Type the number in Phone number. Do not request an SMS code — the account is already verified.
+Login is UK mobile + password (not email). Review demo login is kept privately by the owner (not in this repo). Type the number in Phone number. Do not request an SMS code — the account is already verified.
 
 Apple Pay: used via Stripe Payment Sheet when joining a paid game. Not a standalone Wallet or Settings screen. Merchant ID merchant.com.inteck.pitchin.
 
-After sign-in: open group “Review Kickabout” → open paid game “Paid review kickabout” → tap “Pay £… to join”. The sheet offers Apple Pay and card. PassKit is from the Stripe iOS SDK; we do use it.
+After sign-in: open group “Review Kickabout” → open paid game “Paid review kickabout” → tap “Hold £… to join” (or “Save card to join” if lock is more than 4 days away). The sheet offers Apple Pay and card. The card is held and charged only if the game is confirmed. PassKit is from the Stripe iOS SDK; we do use it.
 ```
 
 Before submitting, the review user must have Stripe Connect charges + transfers enabled (Group → Payouts), then re-run `seed_app_review_user.sql` so the paid game exists and the reviewer is **not** already a player on it.

@@ -54,6 +54,8 @@ export function GroupCoverHeader({ group, onPressBack, onPressMenu }: GroupCover
         <Pressable
           onPress={onPressBack}
           hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
           className="h-10 w-10 items-center justify-center overflow-hidden rounded-full"
         >
           <BlurView intensity={30} tint="dark" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
@@ -63,6 +65,8 @@ export function GroupCoverHeader({ group, onPressBack, onPressMenu }: GroupCover
         <Pressable
           onPress={onPressMenu}
           hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Group options"
           className="h-10 w-10 items-center justify-center overflow-hidden rounded-full"
         >
           <BlurView intensity={30} tint="dark" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
@@ -84,7 +88,9 @@ export function GroupCoverHeader({ group, onPressBack, onPressMenu }: GroupCover
         <Text className="font-sans-extrabold text-3xl text-white" numberOfLines={2}>
           {group.name}
         </Text>
-        <Text className="font-sans text-xs text-white/80">Games lock {group.lockHours}h before kickoff</Text>
+        <Text className="font-sans text-xs text-white/80">
+          Join and leave close {group.lockHours} hours before kickoff
+        </Text>
       </View>
     </View>
   );

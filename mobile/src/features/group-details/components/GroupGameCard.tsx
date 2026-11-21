@@ -1,36 +1,30 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, Text, View } from 'react-native';
 
-import { formatFullDateLabel, formatUkTime, isGameLeaveLocked } from '../../../lib/format';
+import { formatFullDateLabel, formatUkTime } from '../../../lib/format';
 import { colors } from '../../../theme/tokens';
 import { Avatar } from '../../home/components/Avatar';
 import type { GroupGameModel } from '../types';
 
 type GroupGameCardProps = {
   game: GroupGameModel;
-  lockHours: number;
   onPress: () => void;
-  onPressJoin: () => void;
-  onPressLeave: () => void;
 };
 
 /**
- * Full-width Group Details variant of Home's `GameCard` — same visual
- * language (day pill, venue row, spots progress bar) adapted to the
- * screen's full-width layout, plus an avatar stack of joined players and a
- * single Join/Leave action button. Leave uses the group's current lock
- * window as an approximation — existing games keep their own stored hours
- * on the lobby screen itself.
+ * Full-width game row on a group. The card and the View button both open
+ * the game. Joining, paying, and leaving happen on that screen.
  */
-export function GroupGameCard({ game, lockHours, onPress, onPressJoin, onPressLeave }: GroupGameCardProps) {
+export function GroupGameCard({ game, onPress }: GroupGameCardProps) {
   const percentFull = game.maxPlayers > 0 ? Math.min(game.spotsTaken / game.maxPlayers, 1) : 0;
   const venueLabel = [game.venueName, game.venueAddress].filter(Boolean).join(' · ');
-  const isLeaveLocked = isGameLeaveLocked(game.startsAt, game.hasJoined, lockHours);
   const overflowCount = Math.max(game.spotsTaken - game.previewPlayers.length, 0);
 
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`View ${game.title || 'game'}`}
       className="w-full gap-3 rounded-[20px] bg-white p-4"
       style={{ shadowColor: '#0A1C15', shadowOpacity: 0.06, shadowRadius: 15, shadowOffset: { width: 0, height: 8 } }}
     >
@@ -55,7 +49,7 @@ export function GroupGameCard({ game, lockHours, onPress, onPressJoin, onPressLe
       ) : null}
 
       <View className="flex-row items-center justify-between pt-1">
-        <View className="flex-row items-center">
+        <View className="min-w-0 flex-1 flex-row items-center pr-3">
           {game.previewPlayers.map((player, index) => (
             <View key={player.userId} style={{ marginLeft: index === 0 ? 0 : -10 }}>
               <Avatar uri={player.avatarUrl} name={player.name} size={28} ringColor={colors.white} ringWidth={2} />
@@ -69,22 +63,17 @@ export function GroupGameCard({ game, lockHours, onPress, onPressJoin, onPressLe
               <Text className="font-sans-bold text-[10px] text-ink">+{overflowCount}</Text>
             </View>
           ) : null}
+          {game.hasJoined ? <Text className="ml-2 font-sans-bold text-xs text-primary">Joined</Text> : null}
         </View>
 
-        {!game.hasJoined ? (
-          <Pressable onPress={onPressJoin} className="rounded-full bg-ink px-5 py-2.5">
-            <Text className="font-sans-bold text-xs text-white">Join Game</Text>
-          </Pressable>
-        ) : isLeaveLocked ? (
-          <View className="flex-row items-center gap-1.5 rounded-full bg-ink/10 px-5 py-2.5">
-            <Ionicons name="lock-closed" size={11} color={colors.muted} />
-            <Text className="font-sans-bold text-xs text-muted">Leave Game</Text>
-          </View>
-        ) : (
-          <Pressable onPress={onPressLeave} className="rounded-full border border-danger/40 bg-white px-5 py-2.5">
-            <Text className="font-sans-bold text-xs text-danger">Leave Game</Text>
-          </Pressable>
-        )}
+        <Pressable
+          onPress={onPress}
+          accessibilityRole="button"
+          accessibilityLabel="View game"
+          className="min-h-11 items-center justify-center rounded-full bg-ink px-5"
+        >
+          <Text className="font-sans-bold text-sm text-white">View</Text>
+        </Pressable>
       </View>
 
       <View className="gap-1.5">

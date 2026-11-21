@@ -30,11 +30,11 @@ WhatsApp groups fail at:
 2. Create or join **invite-only groups** (e.g. "Woolston 7:30pm Football")
 3. Admins invite by mobile (or email if provided), promote other admins
 4. Admins create **games** (date/time, venue, min/max players, cost, notes)
-5. Players join and pay (Apple Pay / Google Pay / card). No pay = not in the game. Free (£0) games skip Stripe.
-6. Enforce **max players**. Cards are held, not charged, until the game is confirmed. If too few players have committed a card by the lock window (12, 24, 48, or 72 hours before kickoff) the game auto-cancels and holds are released. If holds fail and the game would be short, the organiser decides whether to go ahead or cancel before anyone else is charged.
+5. Players join with Apple Pay, Google Pay, or card. The card is held and charged only when the game is confirmed. No card, no spot. Free (£0) games skip Stripe.
+6. Enforce **max players**. If too few players have committed a card by the group’s lock window (12, 24, 48, or 72 hours before kickoff) the game auto-cancels and nobody is charged. If holds fail and the game would be short, the organiser decides whether to go ahead or cancel before anyone else is charged.
 7. After the game, admin enters **score**
 8. Players vote **Man of the Match**
-9. **MMR** updates on win/draw/loss (opposition strength matters); MOTM gets a small extra bump
+9. **MMR** for that group updates on win/draw/loss (opposition strength matters); MOTM gets a small extra bump. A new football member answers three join questions once; the “standard” answer seeds their starting rating in that group.
 10. Everyone can see **history**: who played, score, MOTM
 
 ## Differentiator
@@ -76,23 +76,23 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 **Built.** Stripe Connect Express (one treasurer per group), pay-to-join with Apple Pay / Google Pay / card. The card is held (manual capture) and charged only when the game is confirmed at lock. Games more than 4 days before lock save the card and the hold is placed closer to lock. If declines would leave the game short, the organiser chooses to go ahead or cancel before any further capture. Pitch-only refunds apply after a payment has been captured. No cash or waive. See `docs/EAS_AND_SECRETS.md` for the Stripe webhook events to enable.
 
 ### Phase 5 — Results & MMR
-**Built.** Admin score entry, MOTM voting, Elo-style MMR + MOTM bump, history and profile stats.
+**Built.** Admin score entry, MOTM voting, history and profile stats. Since 1.0.4 (migration `037`) the rating is **per group** (`group_members.mmr`), not one number on the profile. Football join questions (attack, fitness, standard) ship with that migration. Other sports skip the questions. Migration `038` keeps the bigger K factor until the group has a longer rated history, and allows a 12-hour lock.
 
 ### Phase 6+ (later)
 - Recurring games, announcements / light chat
-- Reliability (show-up %)
-- Per-sport or per-group MMR
+- Reliability (show-up %) in the UI
+- Per-sport MMR (one rating across groups of the same sport). Per-group MMR is already built.
 
 ## Domain concepts
 
 | Concept | Meaning |
 |--------|---------|
-| Profile | User: name, UK mobile, optional email, avatar, MMR, stats |
+| Profile | User: name, UK mobile, optional email, avatar, stats. `profiles.global_mmr` is legacy and unused. |
 | Group | Invite-only community for a regular sport meetup |
 | Admin | Group creator or promoted member; manages invites, games, scores |
 | Game | A single scheduled session inside a group |
 | Lobby | Players who joined a game + payment state |
-| MMR | Matchmaking rating; moves after results |
+| MMR | Matchmaking rating for one group membership; moves after results in that group |
 | MOTM | Man of the Match; peer vote after game |
 
 ## Design tone
@@ -125,7 +125,7 @@ Simple enough for weekly 5-a-sides; structured enough to replace the admin sprea
 - Do not skip RLS
 - Do not use WhatsApp as a backend
 - Do not make groups public by default
-- Do not ship store builds with placeholder legal URLs — Phase 4 ops in `TEMP_CATEGORY_1_LAUNCH.md` must be live first
+- Store legal URLs are the live site: https://www.subupapp.co.uk/privacy and https://www.subupapp.co.uk/terms (Vercel, repo `inteckltd/subup-website`). Do not point a store listing at a placeholder host.
 
 ## Pitch (one liner)
 

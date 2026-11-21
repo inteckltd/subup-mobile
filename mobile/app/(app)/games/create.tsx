@@ -19,6 +19,7 @@ import { ToggleRow } from '../../../src/features/games/components/ToggleRow';
 import { useCreatableGroups, useCreateGame, useGameDetail, useUpdateGame } from '../../../src/features/games/hooks';
 import { connectAccountReady, fetchGroupPayouts, invalidatePayoutsQueries, syncConnectStatus } from '../../../src/features/payments/api';
 import { pitchinServiceFeeCents, playerTotalCents } from '../../../src/features/payments/fees';
+import { repeatGameFormValues } from '../../../src/features/games/repeatGame';
 import {
   CreateGameFormValues,
   centsToPounds,
@@ -45,7 +46,11 @@ function formatTimeInput(date: Date): string {
 }
 
 export default function CreateGameScreen() {
-  const { groupId: groupIdParam, editId } = useLocalSearchParams<{ groupId?: string; editId?: string }>();
+  const { groupId: groupIdParam, editId, repeatId } = useLocalSearchParams<{
+    groupId?: string;
+    editId?: string;
+    repeatId?: string;
+  }>();
   const { session } = useAuth();
   const queryClient = useQueryClient();
   const groupsQuery = useCreatableGroups();
@@ -53,10 +58,15 @@ export default function CreateGameScreen() {
   const { submit: updateSubmit, submitting: updating, error: updateError } = useUpdateGame();
   const editQuery = useGameDetail(editId);
   const isEditing = !!editId;
+  const isRepeating = !!repeatId && !isEditing;
+  const repeatQuery = useGameDetail(isRepeating ? repeatId : undefined);
 
   const groups = groupsQuery.data ?? [];
   const lockHoursRef = useRef<number | null>(null);
   const didPrefillEdit = useRef(false);
+  const didPrefillRepeat = useRef(false);
+  // Holds the copied kickoff until the organiser picks a different group.
+  const repeatGroupHeld = useRef<string | null>(null);
 
   const {
     control,
@@ -69,7 +79,7 @@ export default function CreateGameScreen() {
     resolver: async (values, context, options) =>
       zodResolver(createGameSchemaForLock(lockHoursRef.current))(values, context, options),
     mode: 'onChange',
-    defaultValues: createGameDefaultValues,
+    defaultValues: isRepeating && repeatQuery.data ? repeatGameFormValues(repeatQuery.data) : createGameDefaultValues,
   });
 
   const watchedGroupId = watch('groupId');
@@ -100,11 +110,11 @@ export default function CreateGameScreen() {
   // once the creatable-groups list has loaded and confirms the caller
   // actually admins it (defence in depth — the CTA is admin-only already).
   useEffect(() => {
-    if (!groupIdParam || !groupsQuery.data || isEditing) return;
+    if (!groupIdParam || !groupsQuery.data || isEditing || isRepeating) return;
     if (groupsQuery.data.some((group) => group.id === groupIdParam)) {
       setValue('groupId', groupIdParam, { shouldValidate: true });
     }
-  }, [groupIdParam, groupsQuery.data, setValue, isEditing]);
+  }, [groupIdParam, groupsQuery.data, setValue, isEditing, isRepeating]);
 
   // Prefills venue, date and time from the selected group's defaults
   // whenever the group changes — covers both the groupId-param case above
@@ -120,6 +130,14 @@ export default function CreateGameScreen() {
     if (!watchedGroupId || !groupsQuery.data) return;
     const group = groupsQuery.data.find((g) => g.id === watchedGroupId);
     if (!group) return;
+    // Same-again already filled venue and kickoff from the previous game.
+    // Leave those in place until the organiser picks a different group,
+    // which is when the usual group weekday/time prefill should take over.
+    if (isRepeating && repeatQuery.data?.groupId === watchedGroupId && repeatGroupHeld.current !== 'released') {
+      repeatGroupHeld.current = watchedGroupId;
+      return;
+    }
+    if (isRepeating) repeatGroupHeld.current = 'released';
     setValue('venueName', group.defaultVenueName ?? '');
     setValue('venueAddress', group.defaultVenueAddress ?? '');
     if (group.defaultWeekday != null && group.defaultHour != null && group.defaultMinute != null) {
@@ -127,7 +145,7 @@ export default function CreateGameScreen() {
       setValue('date', next, { shouldValidate: true });
       setValue('time', next, { shouldValidate: true });
     }
-  }, [watchedGroupId, groupsQuery.data, setValue, isEditing]);
+  }, [watchedGroupId, groupsQuery.data, setValue, isEditing, isRepeating, repeatQuery.data]);
 
   useEffect(() => {
     const game = editQuery.data;
@@ -148,6 +166,32 @@ export default function CreateGameScreen() {
     setValue('awayColor', teamColorById(game.awayColor).id);
     setValue('allowWaitlist', game.allowWaitlist);
   }, [isEditing, editQuery.data, setValue]);
+
+  // One tap from a game lobby. Copies venue, cost, duration, and kickoff
+  // (one week later) onto this screen. Confirm still calls create_game.
+  useEffect(() => {
+    if (!isRepeating) return;
+    const game = repeatQuery.data;
+    if (!game || didPrefillRepeat.current) return;
+    didPrefillRepeat.current = true;
+    // They already started editing while the copy was loading. Leave their text.
+    if (isDirty) return;
+    const values = repeatGameFormValues(game);
+    setValue('groupId', values.groupId, { shouldValidate: true });
+    setValue('title', values.title, { shouldValidate: true });
+    setValue('date', values.date, { shouldValidate: true });
+    setValue('time', values.time, { shouldValidate: true });
+    setValue('venueName', values.venueName, { shouldValidate: true });
+    setValue('venueAddress', values.venueAddress, { shouldValidate: true });
+    setValue('minPlayers', values.minPlayers, { shouldValidate: true });
+    setValue('maxPlayers', values.maxPlayers, { shouldValidate: true });
+    setValue('pricePounds', values.pricePounds, { shouldValidate: true });
+    setValue('durationMinutes', values.durationMinutes, { shouldValidate: true });
+    setValue('homeColor', values.homeColor, { shouldValidate: true });
+    setValue('awayColor', values.awayColor, { shouldValidate: true });
+    setValue('allowWaitlist', values.allowWaitlist, { shouldValidate: true });
+    void trigger();
+  }, [isRepeating, repeatQuery.data, setValue, trigger, isDirty]);
 
   useEffect(() => {
     void trigger(['date', 'time']);
@@ -180,12 +224,14 @@ export default function CreateGameScreen() {
           <Pressable
             onPress={() => router.back()}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
             className="h-10 w-10 items-center justify-center rounded-full bg-background"
           >
             <Ionicons name="close" size={18} color={colors.ink} />
           </Pressable>
           <Text className="font-sans-bold text-lg text-ink" style={{ includeFontPadding: false }}>
-            {isEditing ? 'Edit Game' : 'Create New Game'}
+            {isEditing ? 'Edit Game' : isRepeating ? 'Same again next week' : 'Create New Game'}
           </Text>
         </View>
       </SafeAreaView>
@@ -198,6 +244,22 @@ export default function CreateGameScreen() {
           bottomOffset={88}
           contentContainerStyle={{ padding: 20, paddingBottom: 24, gap: 24 }}
         >
+          {isRepeating && repeatQuery.isPending ? (
+            <Text className="font-sans text-sm text-muted">Copying the last game…</Text>
+          ) : null}
+          {isRepeating && repeatQuery.isError ? (
+            <Text className="font-sans-medium text-sm text-danger">
+              Couldn’t copy that game. Fill this in yourself, then tap Create Game.
+            </Text>
+          ) : null}
+          {isRepeating && repeatQuery.data ? (
+            <View className="w-full gap-1 rounded-2xl bg-white px-4 py-4">
+              <Text className="font-sans-bold text-base text-ink">Check the details</Text>
+              <Text className="font-sans text-sm text-muted">
+                Same venue, cost, and kickoff as that game, one week later. Change anything, then tap Create Game.
+              </Text>
+            </View>
+          ) : null}
           <FormSection title="Game details">
             <View className="w-full gap-1.5">
               <Text className="font-sans-bold text-xs text-muted">Group</Text>
@@ -261,8 +323,10 @@ export default function CreateGameScreen() {
               {errors.date ? (
                 <Text className="font-sans-medium text-xs text-danger">{errors.date.message}</Text>
               ) : selectedGroup ? (
-                <Text className="font-sans text-[10px] text-muted">
-                  Kickoff must be at least {selectedGroup.lockHours} hours away so players can join and leave before the lock.
+                <Text className="font-sans text-xs text-muted">
+                  Kickoff must be at least {selectedGroup.lockHours} hours away. Players can join or leave until then. Your card is
+                  only charged once the game is confirmed. If not enough players are in, the game is cancelled and nobody is
+                  charged.
                 </Text>
               ) : null}
             </View>
@@ -284,7 +348,7 @@ export default function CreateGameScreen() {
                 <TextField
                   label="Venue name"
                   icon="location-outline"
-                  placeholder="Search or enter venue name"
+                  placeholder="Powerleague Shoreditch"
                   autoCapitalize="words"
                   value={field.value}
                   onChangeText={field.onChange}
@@ -315,7 +379,7 @@ export default function CreateGameScreen() {
             <View className="w-full flex-row items-center justify-between">
               <View className="flex-1 pr-3">
                 <Text className="font-sans-bold text-sm text-ink">Min Players</Text>
-                <Text className="font-sans text-[10px] text-muted">Game cancels if not met</Text>
+                <Text className="font-sans text-xs text-muted">Game cancels if not met</Text>
               </View>
               <Controller
                 control={control}
@@ -327,7 +391,7 @@ export default function CreateGameScreen() {
             <View className="w-full flex-row items-center justify-between">
               <View className="flex-1 pr-3">
                 <Text className="font-sans-bold text-sm text-ink">Max Players</Text>
-                <Text className="font-sans text-[10px] text-muted">Game fills up at this limit</Text>
+                <Text className="font-sans text-xs text-muted">Game fills up at this limit</Text>
               </View>
               <Controller
                 control={control}
@@ -339,8 +403,8 @@ export default function CreateGameScreen() {
 
             <View className="w-full gap-1.5 border-t border-[#F9FAFB] pt-3">
               <Text className="font-sans-bold text-xs text-muted">Pitch cost per player</Text>
-              <Text className="font-sans text-[10px] text-muted">
-                You receive this amount. Players pay this plus a SubUp fee in the app.
+              <Text className="font-sans text-xs text-muted">
+                You receive this amount once the game is confirmed. Players are charged this plus a SubUp fee only then.
               </Text>
               <Controller
                 control={control}
@@ -351,9 +415,9 @@ export default function CreateGameScreen() {
               />
               {errors.pricePounds ? <Text className="font-sans-medium text-xs text-danger">{errors.pricePounds.message}</Text> : null}
               {priceCents > 0 ? (
-                <Text className="font-sans text-[10px] text-muted">
-                  Players pay {formatGbp(playerTotalCents(priceCents))} ({formatGbp(priceCents)} +{' '}
-                  {formatGbp(pitchinServiceFeeCents(priceCents))} SubUp fee)
+                <Text className="font-sans text-xs text-muted">
+                  Charged once the game is confirmed: {formatGbp(playerTotalCents(priceCents))} ({formatGbp(priceCents)} pitch +{' '}
+                  {formatGbp(pitchinServiceFeeCents(priceCents))} SubUp fee).
                 </Text>
               ) : null}
               {priceCents > 0 && !payoutsReady && watchedGroupId ? (
@@ -406,6 +470,7 @@ export default function CreateGameScreen() {
                   iconBg="#EEF2FF"
                   iconColor="#4338CA"
                   label="Allow waitlist"
+                  description="Players can queue if the game is full, and take a spot if someone leaves."
                   value={field.value}
                   onChange={field.onChange}
                 />
@@ -416,6 +481,11 @@ export default function CreateGameScreen() {
           {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
         </KeyboardAwareScrollView>
         <FormFooter>
+          {!isEditing && groupsQuery.isSuccess && groups.length === 0 ? (
+            <Text className="mb-3 text-center font-sans text-sm text-muted">
+              Only a group admin can schedule a game. Create a group first, or ask an admin to add you.
+            </Text>
+          ) : null}
           <PrimaryButton
             label={isEditing ? 'Save changes' : 'Create Game'}
             loading={submitting || updating}
