@@ -45,7 +45,7 @@ After sign-up the app sends an SMS OTP and calls `confirm_my_mobile()` so `profi
 
 ## Schema
 
-Apply migrations in order under `supabase/migrations/` (`001`–`022`). After a schema change, regenerate types if you use the CLI:
+Apply migrations in order under `supabase/migrations/` (`001`–`038`). After a schema change, regenerate types if you use the CLI:
 
 ```bash
 npx supabase gen types typescript --linked > mobile/src/types/database.ts

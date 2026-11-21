@@ -32,7 +32,7 @@ EXPO_PUBLIC_META_CLIENT_TOKEN # Meta client token; required for production build
 SENTRY_AUTH_TOKEN          # source maps via the Sentry Expo plugin
 ```
 
-`EXPO_PUBLIC_INVITE_APP_URL` is the client-side counterpart of the Edge Function secret `INVITE_APP_URL`. Both fall back to `https://www.subupapp.co.uk` if unset. Invite WhatsApp/Messages share includes the live App Store and Play Store URLs directly.
+`EXPO_PUBLIC_INVITE_APP_URL` is the client-side counterpart of the Edge Function secret `INVITE_APP_URL`. Both fall back to `https://www.subupapp.co.uk` if unset. That host is the live marketing site (Vercel, repo `inteckltd/subup-website`). Invite WhatsApp/Messages share includes the live App Store and Play Store URLs directly.
 
 `SENTRY_ALLOW_FAILURE` is `true` on preview/production today so a missing token does not fail the build. Watch Sentry uploads before a real store ship.
 
