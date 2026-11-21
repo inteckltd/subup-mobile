@@ -1,5 +1,8 @@
 import { Linking, Platform, Share } from 'react-native';
 
+export { buildWhosPlayingMessage, shareDisplayName } from './whosPlaying';
+export type { WhosPlayingInput } from './whosPlaying';
+
 export function inviteShareFirstName(fullName: string | null | undefined): string {
   const part = fullName?.trim().split(/\s+/)[0];
   return part || 'A teammate';
@@ -61,4 +64,19 @@ export async function shareInviteViaWhatsApp(message: string): Promise<void> {
 
 export async function shareInviteViaSms(message: string): Promise<void> {
   await openOrShare(smsUrl(message), message);
+}
+
+function isShareDismissed(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /cancel|dismiss|did not share/i.test(message);
+}
+
+/** Native share sheet. The message should already be plain text (WhatsApp-friendly). */
+export async function sharePlainText(message: string): Promise<void> {
+  try {
+    await Share.share({ message });
+  } catch (error) {
+    if (isShareDismissed(error)) return;
+    throw error;
+  }
 }

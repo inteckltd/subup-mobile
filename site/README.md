@@ -1,31 +1,23 @@
 # SubUp legal / support site
 
-Static pages for App Store Connect and Play Console:
+The public site is already live:
 
-| Store field | File | Path once live |
-| --- | --- | --- |
-| **Support URL** / Marketing URL / Hosted URL | `index.html` | `/` |
-| **Privacy Policy URL** | `privacy.html` | `/privacy.html` |
-| Terms of Use (optional but useful) | `terms.html` | `/terms.html` |
+| Store field | Live URL |
+| --- | --- |
+| **Support URL** / Marketing URL | https://www.subupapp.co.uk/ |
+| **Privacy Policy URL** | https://www.subupapp.co.uk/privacy |
+| Terms of Use | https://www.subupapp.co.uk/terms |
 
-Copy matches in-app draft versions **Terms 1.4** and **Privacy 1.3**. Still needs solicitor review before public launch.
+That site is hosted on Vercel from the separate repo `inteckltd/subup-website`. It is not published from this folder.
 
-## Fastest host (about a minute)
+This `site/` folder is the copy that sits next to the app. In-app versions in `mobile/src/features/auth/schemas.ts` are **Terms 1.7** and **Privacy 1.5**. When these notes were written, the public pages showed Terms 1.6 (dated 26 August 2026) and Privacy 1.5 (dated 3 November 2026). Do not assume the two copies match word for word. Solicitor review is still an open item in [TEMP_CATEGORY_1_LAUNCH.md](../docs/TEMP_CATEGORY_1_LAUNCH.md).
 
-1. Open [app.netlify.com/drop](https://app.netlify.com/drop) (free account).
-2. Drag this `site` folder onto the page.
-3. You get an `https://….netlify.app` URL. Paste that into both stores:
-   - Support / hosted URL → `https://YOUR-SITE.netlify.app`
-   - Privacy → `https://YOUR-SITE.netlify.app/privacy.html`
-   - Terms → `https://YOUR-SITE.netlify.app/terms.html`
+`INVITE_APP_URL` (Edge Function) and `EXPO_PUBLIC_INVITE_APP_URL` (app) both fall back to `https://www.subupapp.co.uk` when unset.
 
-Rename the site in Netlify if you want something like `subup.netlify.app`. Point a custom domain at it later when the marketing site is ready.
+## GitHub Pages workflow
 
-## Stay in this repo (GitHub Pages)
+`.github/workflows/pages.yml` (“Deploy legal site”) is still in this repo. It is set up to publish this `site/` folder to GitHub Pages. It is not how the live site is published (that is Vercel). Actions history shows two runs, both failures, the later one on 9 September 2026. The workflow was left in place on purpose.
 
-After these files are on `main`:
+## Old Netlify shortcut
 
-1. Repo **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-2. The `Deploy legal site` workflow publishes this folder.
-
-Public URL will be `https://inteckltd.github.io/pitchin/` if the repo stays private-with-Pages or is public. If Pages from a private repo is blocked on the org plan, use Netlify Drop instead.
+Netlify Drop was an early way to get an https URL before the marketing site existed. Use the Vercel URLs above in App Store Connect and Play Console.

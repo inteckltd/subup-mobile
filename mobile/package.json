@@ -54,6 +54,7 @@
     "babel-preset-expo": "^57.0.7",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.2",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -62,6 +63,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "test": "TZ=Europe/London tsx --test src/features/games/repeatGame.test.ts src/features/group-details/whosPlaying.test.ts",
     "eas-build-post-install": "node ./scripts/apply-meta-native-config.js"
   },
   "private": true

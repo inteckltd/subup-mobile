@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -18,7 +18,11 @@ import { PrimaryButton } from '../../../src/features/auth/components/PrimaryButt
 import { EmptyState } from '../../../src/features/home/components/EmptyState';
 import { ErrorState } from '../../../src/features/home/components/ErrorState';
 import { CountdownText } from '../../../src/features/games/components/CountdownText';
+import { GameLobbyActions } from '../../../src/features/games/components/GameLobbyActions';
 import { PlayerLobbyRow } from '../../../src/features/games/components/PlayerLobbyRow';
+import { getGroupJoinToken } from '../../../src/features/group-details/api';
+import { groupJoinUrl } from '../../../src/features/group-details/joinLink';
+import { buildWhosPlayingMessage, sharePlainText } from '../../../src/features/group-details/shareInvite';
 import { TeamBoard, TeamDragOverlay, useTeamDrag } from '../../../src/features/games/components/TeamBoard';
 import { useCancelGame, useGameDetail, useGameDetailRefresh, useGamePlayers, useJoinLeaveGame, useMoveGamePlayerTeam } from '../../../src/features/games/hooks';
 import { teamColorById } from '../../../src/features/games/schemas';
@@ -67,6 +71,8 @@ export default function GameDetailsScreen() {
   const { join, payAndJoin, leave, pending, error: actionError } = useJoinLeaveGame(id);
   const { cancel, pending: cancelling, error: cancelError } = useCancelGame(id);
   const { move, error: moveError } = useMoveGamePlayerTeam(id);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [lobbyActionError, setLobbyActionError] = useState<string | null>(null);
 
   const canDrag =
     !!gameQuery.data?.isAdmin &&
@@ -146,6 +152,39 @@ export default function GameDetailsScreen() {
     !game.motmClosedAt &&
     !!game.scoredAt &&
     new Date(game.scoredAt).getTime() + 24 * 60 * 60 * 1000 > now.getTime();
+
+  const onSameAgain = () => {
+    router.push(`/games/create?repeatId=${game.id}`);
+  };
+
+  const onSharePlayers = async () => {
+    setLobbyActionError(null);
+    setShareBusy(true);
+    try {
+      let joinUrl: string | undefined;
+      if (game.isAdmin) {
+        const result = await getGroupJoinToken(game.groupId);
+        if (result.token) joinUrl = groupJoinUrl(result.token);
+      }
+      const playing = players.filter((player) => !player.isWaitlisted && player.paymentStatus !== 'refunded');
+      await sharePlainText(
+        buildWhosPlayingMessage({
+          title: game.title || game.groupName,
+          when: formatLobbyDateTime(game.startsAt),
+          venueName: game.venueName,
+          venueAddress: game.venueAddress,
+          confirmedNames: playing.map((player) => player.name),
+          spotsLeft: Math.max(game.maxPlayers - game.spotsTaken, 0),
+          joinUrl,
+          playersUnavailable: playersQuery.isError,
+        }),
+      );
+    } catch {
+      setLobbyActionError("Couldn't open the share sheet. Please try again.");
+    } finally {
+      setShareBusy(false);
+    }
+  };
 
   return (
     <View className="flex-1 bg-background">
@@ -366,6 +405,17 @@ export default function GameDetailsScreen() {
             </View>
           ) : null}
         </View>
+
+        <GameLobbyActions
+          showSameAgain={game.isAdmin}
+          onSameAgain={onSameAgain}
+          onSharePlayers={() => {
+            void onSharePlayers();
+          }}
+          shareBusy={shareBusy}
+          shareDisabled={playersQuery.isPending}
+          message={lobbyActionError}
+        />
 
         {isCompleted ? (
           <View className="w-full gap-3 rounded-3xl bg-white p-6">

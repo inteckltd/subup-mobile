@@ -31,14 +31,15 @@ Forgot-password uses Supabase Auth `signInWithOtp` (Dashboard rate limits). If a
 - Recurring games
 - Announcements / light chat
 - Reliability (show-up %) in the UI (`reliability_score` exists on profiles)
-- Per-sport or per-group MMR
+- Per-sport MMR (a rating that is not tied to one group). Per-group MMR shipped in 1.0.4 (`037_group_mmr_and_join_questions.sql`): each membership has its own rating.
 
 ## Engineering
+
+The marketing site is live at https://www.subupapp.co.uk (Vercel, repo `inteckltd/subup-website`). `INVITE_APP_URL` falls back to that URL.
 
 - App Attestation / Play Integrity on sensitive Edge Functions
 - Separate `CRON_SECRET` per cron function
 - Dark mode
-- Landing / marketing site
 - Extract shared `friendlyError`
 - Broader automated tests beyond CI lint + `tsc`
 - Comment cleanup of dead `PLAN.md` / `PLAN_PHASE2.md` references
