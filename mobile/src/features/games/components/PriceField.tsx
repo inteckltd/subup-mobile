@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 
+import { colors } from '../../../theme/tokens';
 import { formatPriceField, parsePricePounds, sanitizePriceInput } from '../schemas';
 
 type PriceFieldProps = {
@@ -29,7 +30,7 @@ export function PriceField({ value, onChange, onBlur }: PriceFieldProps) {
         autoCorrect={false}
         autoCapitalize="none"
         placeholder="0.00"
-        placeholderTextColor="#D1D5DB"
+        placeholderTextColor={colors.muted}
         value={text}
         onChangeText={(next) => {
           const sanitized = sanitizePriceInput(next);

@@ -10,7 +10,9 @@ type NotificationTapData = {
  * Subscribes to notification taps (app opened/foregrounded from a tap, or
  * a tap while already open) and navigates from the payload:
  *   - `type === 'group_invite'` → Notifications (Accept / Decline)
- *   - otherwise a `gameId` → Game Details
+ *   - `type === 'score_reminder'` → Enter score
+ *   - `type === 'motm_vote' | 'motm_result'` → Man of the Match
+ *   - otherwise a `gameId` → Game details
  * Matches the `data` shapes `create_game` / `notify-game-created` and
  * `invite_group_member` / `notify-group-invite` use. Returns an
  * unsubscribe function; called once from `app/(app)/_layout.tsx`.
@@ -24,6 +26,10 @@ export function subscribeToNotificationTaps(): () => void {
     }
     if ((data?.type === 'motm_vote' || data?.type === 'motm_result') && data.gameId) {
       router.push(`/games/motm?gameId=${data.gameId}`);
+      return;
+    }
+    if (data?.type === 'score_reminder' && data.gameId) {
+      router.push(`/games/enter-score?gameId=${data.gameId}`);
       return;
     }
     if (data?.gameId) {

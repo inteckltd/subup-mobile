@@ -9,13 +9,13 @@ import type { LockHours, SportType } from '../../types/database';
  * stored value.
  */
 export const WEEKDAYS = [
-  { value: 1, label: 'Mon' },
-  { value: 2, label: 'Tue' },
-  { value: 3, label: 'Wed' },
-  { value: 4, label: 'Thu' },
-  { value: 5, label: 'Fri' },
-  { value: 6, label: 'Sat' },
-  { value: 0, label: 'Sun' },
+  { value: 1, label: 'Mon', name: 'Monday' },
+  { value: 2, label: 'Tue', name: 'Tuesday' },
+  { value: 3, label: 'Wed', name: 'Wednesday' },
+  { value: 4, label: 'Thu', name: 'Thursday' },
+  { value: 5, label: 'Fri', name: 'Friday' },
+  { value: 6, label: 'Sat', name: 'Saturday' },
+  { value: 0, label: 'Sun', name: 'Sunday' },
 ] as const;
 
 export const LOCK_HOURS_OPTIONS: { value: LockHours; label: string }[] = [

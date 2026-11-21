@@ -148,6 +148,8 @@ export default function EditProfileScreen() {
           <Pressable
             onPress={() => router.back()}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
             className="h-10 w-10 items-center justify-center rounded-full bg-background"
           >
             <Ionicons name="chevron-back" size={18} color={colors.ink} />
@@ -212,7 +214,7 @@ export default function EditProfileScreen() {
               name="mobile"
               render={({ field }) => (
                 <TextField
-                  label="Phone number"
+                  label="Mobile"
                   icon="call-outline"
                   keyboardType="phone-pad"
                   placeholder="07912 345678"

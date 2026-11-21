@@ -153,7 +153,7 @@ export default function JoinQuestionsScreen() {
               </Text>
               <Text className="font-sans text-sm text-muted">
                 {questions
-                  ? 'Three quick questions help us build balanced teams. Answers are locked once you submit, so answer honestly. Your results take over your rating from there.'
+                  ? "You can't change these later. They set your starting rating, then real games take over. Three questions help us build balanced teams."
                   : 'Join this group to see games and play with this squad.'}
               </Text>
             </View>

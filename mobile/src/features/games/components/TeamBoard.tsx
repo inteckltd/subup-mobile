@@ -242,7 +242,7 @@ function TeamDropZone({
           </View>
         </View>
         <View className="rounded-full bg-black/5 px-2.5 py-1">
-          <Text className="font-sans-bold text-[10px] text-muted">Overall MMR {averageMmr(players)}</Text>
+          <Text className="font-sans-bold text-xs text-muted">Overall rating {averageMmr(players)}</Text>
         </View>
       </View>
 

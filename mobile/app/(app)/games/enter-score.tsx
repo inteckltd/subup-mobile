@@ -73,6 +73,8 @@ export default function EnterScoreScreen() {
           <Pressable
             onPress={() => router.back()}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
             className="h-10 w-10 items-center justify-center rounded-full bg-background"
           >
             <Ionicons name="close" size={18} color={colors.ink} />
@@ -127,7 +129,7 @@ export default function EnterScoreScreen() {
             <TextField
               label="Notes (optional)"
               icon="document-text-outline"
-              placeholder="e.g. Man of the match, notable moments"
+              placeholder="Anything the squad should know"
               multiline
               numberOfLines={3}
               value={notes}

@@ -224,6 +224,8 @@ export default function CreateGameScreen() {
           <Pressable
             onPress={() => router.back()}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
             className="h-10 w-10 items-center justify-center rounded-full bg-background"
           >
             <Ionicons name="close" size={18} color={colors.ink} />
@@ -247,14 +249,14 @@ export default function CreateGameScreen() {
           ) : null}
           {isRepeating && repeatQuery.isError ? (
             <Text className="font-sans-medium text-sm text-danger">
-              Could not copy that game. Fill this in yourself, then tap Create Game.
+              Couldn’t copy that game. Fill this in yourself, then tap Create Game.
             </Text>
           ) : null}
           {isRepeating && repeatQuery.data ? (
             <View className="w-full gap-1 rounded-2xl bg-white px-4 py-4">
               <Text className="font-sans-bold text-base text-ink">Check the details</Text>
               <Text className="font-sans text-sm text-muted">
-                Same venue, cost, and kick-off as that game, one week later. Change anything, then tap Create Game.
+                Same venue, cost, and kickoff as that game, one week later. Change anything, then tap Create Game.
               </Text>
             </View>
           ) : null}
@@ -321,8 +323,9 @@ export default function CreateGameScreen() {
               {errors.date ? (
                 <Text className="font-sans-medium text-xs text-danger">{errors.date.message}</Text>
               ) : selectedGroup ? (
-                <Text className="font-sans text-[10px] text-muted">
-                  Kickoff must be at least {selectedGroup.lockHours} hours away so players can join and leave before the lock.
+                <Text className="font-sans text-xs text-muted">
+                  Kickoff must be at least {selectedGroup.lockHours} hours away. Players can join or leave until then. If you
+                  still don’t have the minimum, the game is cancelled and the pitch money is refunded.
                 </Text>
               ) : null}
             </View>
@@ -344,7 +347,7 @@ export default function CreateGameScreen() {
                 <TextField
                   label="Venue name"
                   icon="location-outline"
-                  placeholder="Search or enter venue name"
+                  placeholder="Powerleague Shoreditch"
                   autoCapitalize="words"
                   value={field.value}
                   onChangeText={field.onChange}
@@ -375,7 +378,7 @@ export default function CreateGameScreen() {
             <View className="w-full flex-row items-center justify-between">
               <View className="flex-1 pr-3">
                 <Text className="font-sans-bold text-sm text-ink">Min Players</Text>
-                <Text className="font-sans text-[10px] text-muted">Game cancels if not met</Text>
+                <Text className="font-sans text-xs text-muted">Game cancels if not met</Text>
               </View>
               <Controller
                 control={control}
@@ -387,7 +390,7 @@ export default function CreateGameScreen() {
             <View className="w-full flex-row items-center justify-between">
               <View className="flex-1 pr-3">
                 <Text className="font-sans-bold text-sm text-ink">Max Players</Text>
-                <Text className="font-sans text-[10px] text-muted">Game fills up at this limit</Text>
+                <Text className="font-sans text-xs text-muted">Game fills up at this limit</Text>
               </View>
               <Controller
                 control={control}
@@ -399,7 +402,7 @@ export default function CreateGameScreen() {
 
             <View className="w-full gap-1.5 border-t border-[#F9FAFB] pt-3">
               <Text className="font-sans-bold text-xs text-muted">Pitch cost per player</Text>
-              <Text className="font-sans text-[10px] text-muted">
+              <Text className="font-sans text-xs text-muted">
                 You receive this amount. Players pay this plus a SubUp fee in the app.
               </Text>
               <Controller
@@ -411,7 +414,7 @@ export default function CreateGameScreen() {
               />
               {errors.pricePounds ? <Text className="font-sans-medium text-xs text-danger">{errors.pricePounds.message}</Text> : null}
               {priceCents > 0 ? (
-                <Text className="font-sans text-[10px] text-muted">
+                <Text className="font-sans text-xs text-muted">
                   Players pay {formatGbp(playerTotalCents(priceCents))} ({formatGbp(priceCents)} +{' '}
                   {formatGbp(pitchinServiceFeeCents(priceCents))} SubUp fee)
                 </Text>
@@ -466,6 +469,7 @@ export default function CreateGameScreen() {
                   iconBg="#EEF2FF"
                   iconColor="#4338CA"
                   label="Allow waitlist"
+                  description="Players can queue if the game is full, and take a spot if someone leaves."
                   value={field.value}
                   onChange={field.onChange}
                 />
@@ -476,6 +480,11 @@ export default function CreateGameScreen() {
           {submitError ? <Text className="font-sans-medium text-sm text-danger">{submitError}</Text> : null}
         </KeyboardAwareScrollView>
         <FormFooter>
+          {!isEditing && groupsQuery.isSuccess && groups.length === 0 ? (
+            <Text className="mb-3 text-center font-sans text-sm text-muted">
+              Only a group admin can schedule a game. Create a group first, or ask an admin to add you.
+            </Text>
+          ) : null}
           <PrimaryButton
             label={isEditing ? 'Save changes' : 'Create Game'}
             loading={submitting || updating}

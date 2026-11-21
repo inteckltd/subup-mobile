@@ -27,15 +27,22 @@ export function GameLobbyActions({
           label="Same again next week"
           variant="outline"
           icon="arrow-redo-outline"
+          accessibilityRole="button"
+          accessibilityLabel="Same again next week"
+          className="min-h-11"
           onPress={onSameAgain}
         />
       ) : null}
       <PrimaryButton
-        label="Share who's playing"
+        label="Share who’s playing"
         variant="outline"
         icon="share-outline"
         loading={shareBusy}
         disabled={shareDisabled}
+        accessibilityRole="button"
+        accessibilityLabel="Share who’s playing"
+        accessibilityState={{ disabled: !!shareDisabled || !!shareBusy, busy: !!shareBusy }}
+        className="min-h-11"
         onPress={onSharePlayers}
       />
       {message ? <Text className="font-sans-medium text-sm text-danger">{message}</Text> : null}

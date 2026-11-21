@@ -147,7 +147,13 @@ export default function GroupPayoutsScreen() {
     <View className="flex-1 bg-background">
       <SafeAreaView edges={['top']} className="bg-white">
         <View className="flex-row items-center gap-4 border-b border-border px-4 py-4">
-          <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center rounded-full bg-background">
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            className="h-10 w-10 items-center justify-center rounded-full bg-background"
+          >
             <Ionicons name="chevron-back" size={18} color={colors.ink} />
           </Pressable>
           <Text className="font-sans-bold text-lg text-ink">Payouts</Text>

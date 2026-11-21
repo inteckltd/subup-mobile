@@ -74,13 +74,7 @@ export function formatFullDateLabel(startsAt: string): string {
   return `${weekday}, ${monthDay}`.toUpperCase();
 }
 
-/**
- * Whether a joined player is currently locked out of leaving a game — true
- * within `lockHours` (default 24, matching `games.cancel_if_min_not_met_hours`)
- * of `starts_at`. Encapsulated here (rather than inline in a component) so
- * the `Date.now()` call happens inside a plain utility function, not a
- * component's render body — see GroupGameCard.tsx.
- */
+/** Hours from `now` until `startsAt`. Negative once kickoff has passed. */
 export function hoursUntilStart(startsAt: string, now: Date = new Date()): number {
   return (new Date(startsAt).getTime() - now.getTime()) / (1000 * 60 * 60);
 }
@@ -92,11 +86,6 @@ export function hoursUntilStart(startsAt: string, now: Date = new Date()): numbe
 export function isInsideLockWindow(startsAt: string, lockHours: number, now: Date = new Date()): boolean {
   if (lockHours <= 0) return false;
   return hoursUntilStart(startsAt, now) < lockHours;
-}
-
-export function isGameLeaveLocked(startsAt: string, hasJoined: boolean, lockHours = 24): boolean {
-  if (!hasJoined) return false;
-  return isInsideLockWindow(startsAt, lockHours);
 }
 
 /** "Friday, 24 Oct • 7:30pm" — lobby header date line. */
@@ -122,7 +111,9 @@ export function formatLockDeadline(startsAt: string, lockHours: number): string 
   return `${formatUkTime(iso)} on ${formatUkDate(iso)}`;
 }
 
-/** Live countdown: "1d 23h 47m", "04h 22m 15s", or "22m 15s". */
+/**
+ * Live countdown. Seconds only in the last hour: "1d 23h 47m", "04h 22m", or "22m 15s".
+ */
 export function formatCountdown(startsAt: string, now: Date = new Date()): string {
   const totalSeconds = Math.max(0, Math.floor((new Date(startsAt).getTime() - now.getTime()) / 1000));
   const days = Math.floor(totalSeconds / 86_400);
@@ -131,7 +122,7 @@ export function formatCountdown(startsAt: string, now: Date = new Date()): strin
   const seconds = totalSeconds % 60;
   const pad = (value: number) => String(value).padStart(2, '0');
   if (days > 0) return `${days}d ${pad(hours)}h ${pad(minutes)}m`;
-  if (hours > 0) return `${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`;
+  if (hours > 0) return `${pad(hours)}h ${pad(minutes)}m`;
   return `${pad(minutes)}m ${pad(seconds)}s`;
 }
 

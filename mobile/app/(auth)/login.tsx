@@ -61,7 +61,7 @@ export default function LoginScreen() {
         name="mobile"
         render={({ field }) => (
           <TextField
-            label="Phone number"
+            label="Mobile"
             icon="call-outline"
             placeholder="07912 345678"
             keyboardType="phone-pad"
