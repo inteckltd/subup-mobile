@@ -21,6 +21,7 @@
     "expo-constants": "~57.0.11",
     "expo-crypto": "~57.0.4",
     "expo-dev-client": "~57.0.20",
+    "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.1",
     "expo-image": "~57.0.5",
     "expo-image-picker": "~57.0.20",
@@ -29,6 +30,7 @@
     "expo-notifications": "~57.0.24",
     "expo-router": "~57.0.28",
     "expo-secure-store": "~57.0.4",
+    "expo-sharing": "~57.0.26",
     "expo-splash-screen": "~57.0.10",
     "expo-status-bar": "~57.0.1",
     "expo-tracking-transparency": "~57.0.2",
@@ -54,6 +56,7 @@
     "babel-preset-expo": "^57.0.7",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.2",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -62,6 +65,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "test": "TZ=Europe/London tsx --test src/features/games/repeatGame.test.ts src/features/games/calendarIcs.test.ts src/features/group-details/whosPlaying.test.ts src/lib/clientError.test.ts",
     "eas-build-post-install": "node ./scripts/apply-meta-native-config.js"
   },
   "private": true

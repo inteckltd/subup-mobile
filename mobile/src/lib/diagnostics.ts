@@ -1,3 +1,6 @@
+import { AppState } from 'react-native';
+
+import { describeClientError, shouldDropKeychainNoise } from './clientError';
 import { captureSentryException } from './sentry';
 
 const RING_SIZE = 20;
@@ -10,22 +13,15 @@ export type DiagnosticError = {
 
 const ring: DiagnosticError[] = [];
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === 'string' && error) return error;
-  if (error && typeof error === 'object' && 'message' in error) {
-    const message = String((error as { message: unknown }).message);
-    if (message) return message;
-  }
-  return 'Unknown error';
-}
-
 /** Session-only ring of recent client errors for Settings diagnostics. Not persisted. */
 export function recordDiagnosticError(source: string, error: unknown): void {
+  const described = describeClientError(error);
+  // Locked-phone keychain errors are expected. Don't crowd out real failures.
+  if (shouldDropKeychainNoise(described, { inForeground: AppState.currentState === 'active' })) return;
   ring.unshift({
     at: new Date().toISOString(),
     source,
-    message: errorMessage(error),
+    message: described.message || 'Unknown error',
   });
   if (ring.length > RING_SIZE) ring.length = RING_SIZE;
   captureSentryException(error, source);
