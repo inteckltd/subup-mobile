@@ -6,7 +6,8 @@
 // 4. auth.admin.deleteUser so they cannot log in. Remaining game_players
 //    rows SET NULL and show as "Deleted user".
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
+import { releaseUserUpcomingPayments } from '../_shared/lock-runner.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { getStripe } from '../_shared/stripe.ts';
 
@@ -22,8 +23,40 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+/** Mirrors delete_my_account's last-admin guard so we don't refund and then refuse. */
+async function lastAdminBlockMessage(service: SupabaseClient, userId: string): Promise<string | null> {
+  const { data: adminRows, error } = await service
+    .from('group_members')
+    .select('group_id')
+    .eq('user_id', userId)
+    .eq('role', 'admin');
+  if (error) throw error;
+  const groupIds = ((adminRows ?? []) as { group_id: string }[]).map((row) => row.group_id);
+  if (groupIds.length === 0) return null;
+
+  const [{ data: groups, error: groupsError }, { data: members, error: membersError }] = await Promise.all([
+    service.from('groups').select('id, name').in('id', groupIds),
+    service.from('group_members').select('group_id, user_id, role').in('group_id', groupIds),
+  ]);
+  if (groupsError) throw groupsError;
+  if (membersError) throw membersError;
+
+  const names = new Map(((groups ?? []) as { id: string; name: string | null }[]).map((group) => [group.id, group.name]));
+  const blocked: string[] = [];
+  for (const groupId of groupIds) {
+    const others = ((members ?? []) as { group_id: string; user_id: string; role: string }[])
+      .filter((member) => member.group_id === groupId && member.user_id !== userId);
+    if (others.length === 0) continue;
+    if (others.some((member) => member.role === 'admin')) continue;
+    blocked.push(names.get(groupId)?.trim() || 'a group');
+  }
+  if (blocked.length === 0) return null;
+  blocked.sort((a, b) => a.localeCompare(b));
+  return `Promote another admin in ${blocked.join(', ')} before deleting your account.`;
+}
+
 async function emptyFolder(
-  client: ReturnType<typeof createClient>,
+  client: SupabaseClient,
   bucket: string,
   prefix: string,
 ) {
@@ -68,21 +101,27 @@ Deno.serve(async (req) => {
   }
 
   const userId = userData.user.id;
-
   const serviceClient = createClient(supabaseUrl, serviceRoleKey);
+
+  try {
+    const blocked = await lastAdminBlockMessage(serviceClient, userId);
+    if (blocked) return jsonResponse({ ok: false, error: blocked }, 400);
+  } catch (guardError) {
+    console.error('[delete-my-account] last-admin check failed', guardError);
+    await captureEdgeError('delete-my-account', guardError);
+    return jsonResponse({ ok: false, error: "Couldn't delete your account. Please try again." }, 500);
+  }
+
   if (Deno.env.get('STRIPE_SECRET_KEY')) {
     try {
-      const stripe = getStripe();
-      const { data: openIntents } = await serviceClient.rpc('list_user_open_payment_intents', { p_user_id: userId });
-      for (const row of (openIntents ?? []) as { stripe_payment_intent_id: string }[]) {
-        if (!row.stripe_payment_intent_id) continue;
-        await stripe.paymentIntents.cancel(row.stripe_payment_intent_id).catch((cancelError) => {
-          console.error('[delete-my-account] cancel hold failed', cancelError);
-        });
-      }
+      // Refund captured payments and cancel holds while the ledger rows still
+      // exist. A succeeded PaymentIntent cannot be cancelled. Do this only
+      // after the last-admin guard, so a refused delete does not refund anyone.
+      await releaseUserUpcomingPayments(serviceClient, getStripe(), userId);
     } catch (stripeError) {
-      console.error('[delete-my-account] could not release holds', stripeError);
+      console.error('[delete-my-account] could not release payments', stripeError);
       await captureEdgeError('delete-my-account', stripeError);
+      return jsonResponse({ ok: false, error: "Couldn't refund your upcoming games. Please try again." }, 500);
     }
   }
 

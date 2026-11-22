@@ -2,9 +2,11 @@
 
 import Stripe from 'npm:stripe@17.7.0';
 
+import { confirmPaidJoin } from '../_shared/lock-runner.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import { accountTransfersEnabled, getStripe } from '../_shared/stripe.ts';
+import { paymentIntentChargeId } from '../_shared/join-payment-flow.ts';
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -45,17 +47,17 @@ Deno.serve(async (req) => {
   try {
     switch (event.type) {
       case 'payment_intent.succeeded': {
+        // Immediate-capture (1.0.6) and a later hold capture both land here.
+        // A refunded row stays refunded: the PaymentIntent status is still succeeded.
         const intent = event.data.object as Stripe.PaymentIntent;
-        const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : intent.latest_charge?.id;
-        await service.rpc('confirm_paid_join', {
-          p_payment_intent_id: intent.id,
-          p_charge_id: chargeId ?? null,
-        });
+        await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
         break;
       }
       case 'payment_intent.amount_capturable_updated': {
         const intent = event.data.object as Stripe.PaymentIntent;
-        if (intent.status === 'requires_capture' && intent.amount_capturable > 0) {
+        // Automatic capture never authorises a hold. Ignore it so a 1.0.6
+        // charge cannot be stored as payment_status 'authorized'.
+        if (intent.capture_method === 'manual' && intent.status === 'requires_capture' && intent.amount_capturable > 0) {
           const method = intent.payment_method;
           const methodId = typeof method === 'string' ? method : method?.id ?? null;
           await service.rpc('mark_join_authorized', {

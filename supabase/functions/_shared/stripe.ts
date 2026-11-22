@@ -62,7 +62,9 @@ export function isIdempotentRefundError(error: unknown): boolean {
   );
 }
 
-function chargeTransferId(charge: Stripe.Charge | Stripe.DeletedCharge | string | null): string | null {
+type MaybeDeletedCharge = { deleted?: boolean; transfer?: string | { id: string } | null };
+
+function chargeTransferId(charge: Stripe.Charge | MaybeDeletedCharge | string | null): string | null {
   if (!charge || typeof charge === 'string') return null;
   if ('deleted' in charge && charge.deleted) return null;
   const transfer = charge.transfer;
@@ -174,15 +176,14 @@ export async function refundSucceededPayments(
   for (const row of rows) {
     try {
       await refundPaymentIntent(stripe, row.stripe_payment_intent_id, row.pitch_cents);
-      refunded += 1;
     } catch (refundError) {
-      if (isIdempotentRefundError(refundError)) {
-        await service.rpc('mark_game_payment_refunded', { p_payment_intent_id: row.stripe_payment_intent_id });
-        refunded += 1;
-        continue;
-      }
-      throw refundError;
+      if (!isIdempotentRefundError(refundError)) throw refundError;
     }
+    const { error: markError } = await service.rpc('mark_game_payment_refunded', {
+      p_payment_intent_id: row.stripe_payment_intent_id,
+    });
+    if (markError) throw markError;
+    refunded += 1;
   }
   return refunded;
 }

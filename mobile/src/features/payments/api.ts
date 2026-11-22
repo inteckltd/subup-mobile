@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { recordDiagnosticError } from '../../lib/diagnostics';
 import { supabase } from '../../lib/supabase';
+import { joinPaymentRequest } from './joinPaymentRequest';
 import type { GroupPayoutsRow } from '../../types/database';
 import type { GroupPayoutsModel } from '../group-details/types';
 
@@ -184,12 +185,12 @@ export async function startConnectOnboarding(): Promise<{ url?: string; error?: 
 }
 
 export async function payToJoinGame(gameId: string): Promise<{ error?: string }> {
-  const { data, error } = await supabase.functions.invoke('create-join-payment', { body: { gameId } });
+  const { data, error } = await supabase.functions.invoke('create-join-payment', { body: joinPaymentRequest(gameId) });
   if (error || data?.ok === false) {
     await supabase.rpc('release_my_pending_join', { p_game_id: gameId });
     return { error: friendlyError(error ?? data, data?.error ?? "Couldn't start payment.") };
   }
-  if (data.mode === 'already_held' || data.mode === 'already_saved') {
+  if (data.mode === 'already_held' || data.mode === 'already_saved' || data.mode === 'already_paid') {
     return {};
   }
   if (!data.clientSecret) {

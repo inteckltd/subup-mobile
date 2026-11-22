@@ -10,7 +10,13 @@
 
 import { timingSafeEqual } from '../_shared/crypto.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
-import { cancelUncapturedPayments, placeDueOffSessionHolds, settleLocksBeforeSql } from '../_shared/lock-runner.ts';
+import {
+  cancelUncapturedPayments,
+  confirmSucceededPendingJoins,
+  placeDueOffSessionHolds,
+  refundCapturedOrCancel,
+  settleLocksBeforeSql,
+} from '../_shared/lock-runner.ts';
 import { getStripe, payoutDueTreasurerGames, refundSucceededPayments } from '../_shared/stripe.ts';
 import { createServiceClient, withJwtSkewRetry } from '../_shared/supabase.ts';
 
@@ -86,6 +92,18 @@ Deno.serve(async (req) => {
   }
 
   const serviceClient = createServiceClient(supabaseUrl, serviceRoleKey);
+  const stripe = Deno.env.get('STRIPE_SECRET_KEY') ? getStripe() : null;
+
+  if (stripe) {
+    try {
+      // A 1.0.6 charge can succeed before the webhook lands. Confirm it before
+      // expire_pending_joins deletes the row and leaves the capture orphaned.
+      await confirmSucceededPendingJoins(serviceClient, stripe);
+    } catch (confirmError) {
+      console.error('[apply-game-lock] confirm succeeded joins failed', confirmError);
+      await captureEdgeError('apply-game-lock', confirmError);
+    }
+  }
 
   const { data: expired, error: expireError } = await withJwtSkewRetry(() =>
     serviceClient.rpc('expire_pending_joins'),
@@ -93,23 +111,41 @@ Deno.serve(async (req) => {
   if (expireError) {
     console.error('[apply-game-lock] expire_pending_joins failed', expireError);
     await captureEdgeError('apply-game-lock', expireError);
-  } else if (Deno.env.get('STRIPE_SECRET_KEY')) {
-    const stripe = getStripe();
-    for (const row of (expired ?? []) as { payment_intent_id: string | null }[]) {
+  } else if (stripe) {
+    const expiredRows = (expired ?? []) as { payment_intent_id: string | null }[];
+    const intentIds = expiredRows.map((row) => row.payment_intent_id).filter((id): id is string => !!id);
+    const pitchByIntent = new Map<string, number | null>();
+    if (intentIds.length > 0) {
+      const { data: payments, error: paymentsError } = await serviceClient
+        .from('game_payments')
+        .select('stripe_payment_intent_id, pitch_cents')
+        .in('stripe_payment_intent_id', intentIds);
+      if (paymentsError) {
+        console.error('[apply-game-lock] expired payment lookup failed', paymentsError);
+        await captureEdgeError('apply-game-lock', paymentsError);
+      } else {
+        for (const payment of (payments ?? []) as { stripe_payment_intent_id: string | null; pitch_cents: number | null }[]) {
+          if (payment.stripe_payment_intent_id) pitchByIntent.set(payment.stripe_payment_intent_id, payment.pitch_cents);
+        }
+      }
+    }
+    for (const row of expiredRows) {
       if (!row.payment_intent_id) continue;
       try {
-        await stripe.paymentIntents.cancel(row.payment_intent_id);
+        await refundCapturedOrCancel(
+          stripe,
+          serviceClient,
+          row.payment_intent_id,
+          pitchByIntent.get(row.payment_intent_id) ?? null,
+        );
       } catch (cancelError) {
-        const message = cancelError instanceof Error ? cancelError.message : String(cancelError);
-        if (!/canceled|cannot be canceled/i.test(message)) {
-          console.error('[apply-game-lock] cancel PaymentIntent failed', cancelError);
-        }
+        console.error('[apply-game-lock] release expired PaymentIntent failed', cancelError);
+        await captureEdgeError('apply-game-lock', cancelError);
       }
     }
   }
 
-  if (Deno.env.get('STRIPE_SECRET_KEY')) {
-    const stripe = getStripe();
+  if (stripe) {
     try {
       await placeDueOffSessionHolds(serviceClient, stripe);
       await settleLocksBeforeSql(serviceClient, stripe);
@@ -131,8 +167,7 @@ Deno.serve(async (req) => {
   const lockRows = ((processed ?? []) as { game_id: string; action: string }[]);
   const gameIds = lockRows.map((row) => row.game_id);
 
-  if (Deno.env.get('STRIPE_SECRET_KEY')) {
-    const stripe = getStripe();
+  if (stripe) {
     for (const row of lockRows) {
       if (row.action !== 'cancelled') continue;
       try {

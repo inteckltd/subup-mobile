@@ -1,5 +1,6 @@
 // Leave a paid / pending game: refund or cancel the PaymentIntent, then leave_game.
 
+import { refundCapturedOrCancel } from '../_shared/lock-runner.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import {
@@ -7,7 +8,6 @@ import {
   getStripe,
   isIdempotentRefundError,
   jsonResponse,
-  refundPaymentIntent,
   requireUserId,
 } from '../_shared/stripe.ts';
 
@@ -59,37 +59,32 @@ Deno.serve(async (req) => {
     }
 
     const stripe = getStripe();
-    if (player.payment_status === 'paid' && player.stripe_payment_intent_id) {
+    if (player.stripe_payment_intent_id) {
       const { data: payment, error: paymentError } = await service
         .from('game_payments')
         .select('pitch_cents')
         .eq('stripe_payment_intent_id', player.stripe_payment_intent_id)
         .maybeSingle();
       if (paymentError) throw paymentError;
-      if (payment?.pitch_cents == null) {
+      // paid is the immediate-capture ledger. pending can also already be
+      // captured at Stripe if the webhook has not landed — refund that too,
+      // instead of treating a failed cancel as success and dropping the spot.
+      if (player.payment_status === 'paid' && payment?.pitch_cents == null) {
         return jsonResponse({ ok: false, error: "Couldn't refund this payment. Please try again." }, 400);
       }
       try {
-        await refundPaymentIntent(stripe, player.stripe_payment_intent_id, payment.pitch_cents);
-      } catch (refundError) {
-        if (!isIdempotentRefundError(refundError)) {
-          await captureEdgeError('leave-paid-game', refundError);
-          return jsonResponse({ ok: false, error: "Couldn't refund this payment. Please try again." }, 400);
-        }
-      }
-    }
-
-    if (
-      (player.payment_status === 'pending' || player.payment_status === 'authorized' || player.payment_status === 'card_saved')
-      && player.stripe_payment_intent_id
-    ) {
-      try {
-        await stripe.paymentIntents.cancel(player.stripe_payment_intent_id);
-      } catch (cancelError) {
-        const message = cancelError instanceof Error ? cancelError.message : String(cancelError);
-        if (!/canceled|cannot be canceled/i.test(message)) {
-          await captureEdgeError('leave-paid-game', cancelError);
-          return jsonResponse({ ok: false, error: "Couldn't release the card hold. Please try again." }, 400);
+        await refundCapturedOrCancel(stripe, service, player.stripe_payment_intent_id, payment?.pitch_cents ?? null);
+      } catch (releaseError) {
+        if (!isIdempotentRefundError(releaseError)) {
+          await captureEdgeError('leave-paid-game', releaseError);
+          const message = releaseError instanceof Error ? releaseError.message : '';
+          const refundFailed = player.payment_status === 'paid' || /pitch amount/i.test(message);
+          return jsonResponse({
+            ok: false,
+            error: refundFailed
+              ? "Couldn't refund this payment. Please try again."
+              : "Couldn't release the card hold. Please try again.",
+          }, 400);
         }
       }
     }
