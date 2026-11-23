@@ -23,5 +23,5 @@ jobs:
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test
-      - run: node --experimental-strip-types --test supabase/functions/_shared/lock-decision.test.ts supabase/functions/_shared/join-payment-flow.test.ts
+      - run: node --experimental-strip-types --test supabase/functions/_shared/lock-decision.test.ts supabase/functions/_shared/join-payment-flow.test.ts supabase/functions/_shared/payment-hotfix.test.ts supabase/functions/_shared/payment-lifecycle.test.ts
         working-directory: ${{ github.workspace }}

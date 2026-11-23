@@ -8,7 +8,7 @@
   "scripts": {
     "dev:mobile": "npm run start --workspace=mobile",
     "lint:mobile": "npm run lint --workspace=mobile",
-    "test:holds": "node --experimental-strip-types --test supabase/functions/_shared/lock-decision.test.ts supabase/functions/_shared/join-payment-flow.test.ts",
+    "test:holds": "node --experimental-strip-types --test supabase/functions/_shared/lock-decision.test.ts supabase/functions/_shared/join-payment-flow.test.ts supabase/functions/_shared/payment-hotfix.test.ts supabase/functions/_shared/payment-lifecycle.test.ts",
     "eas-build-post-install": "node mobile/scripts/apply-meta-native-config.js"
   }
 }

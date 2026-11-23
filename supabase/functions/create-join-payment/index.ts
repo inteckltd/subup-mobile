@@ -18,7 +18,7 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
-import { confirmPaidJoin, ensureStripeCustomer, manualHoldParams } from '../_shared/lock-runner.ts';
+import { authorizeJoin, confirmPaidJoin, ensureStripeCustomer, manualHoldParams } from '../_shared/lock-runner.ts';
 import {
   joinPaymentFlow,
   legacyJoinPaymentResponse,
@@ -219,7 +219,7 @@ Deno.serve(async (req) => {
       const plan = planHoldExistingIntent({ status: existing.status, captureMethod: existing.capture_method });
       if (plan === 'confirm_paid') {
         reservedPlayerId = null;
-        const result = await confirmPaidJoin(service, existing.id, paymentIntentChargeId(existing.latest_charge));
+        const result = await confirmPaidJoin(service, stripe, existing.id, paymentIntentChargeId(existing.latest_charge), 'create-join-payment');
         if (result === 'skipped_refunded') {
           return jsonResponse({ ok: false, error: "Couldn't start payment" }, 400);
         }
@@ -336,10 +336,10 @@ async function startLegacyPayment(input: {
     const existing = await stripe.paymentIntents.retrieve(paymentIntentId);
     const plan = planLegacyExistingIntent({ status: existing.status, captureMethod: existing.capture_method });
     if (plan === 'confirm_paid') {
-      return confirmLegacyCapture(existing, row, service, input.keepReservation);
+      return confirmLegacyCapture(existing, row, service, stripe, input.keepReservation);
     }
     if (plan === 'mark_authorized') {
-      return markLegacyHold(existing, service, input.keepReservation);
+      return markLegacyHold(existing, service, stripe, input.keepReservation);
     }
     if (plan === 'keep') {
       input.keepReservation();
@@ -398,12 +398,13 @@ async function confirmLegacyCapture(
   existing: Stripe.PaymentIntent,
   row: ReserveRow,
   service: SupabaseClient,
+  stripe: Stripe,
   keepReservation: () => void,
 ): Promise<Response> {
   // Stop our own error path from deleting a row whose card was already captured.
   keepReservation();
   try {
-    const result = await confirmPaidJoin(service, existing.id, paymentIntentChargeId(existing.latest_charge));
+    const result = await confirmPaidJoin(service, stripe, existing.id, paymentIntentChargeId(existing.latest_charge), 'create-join-payment');
     if (result === 'skipped_refunded') {
       return jsonResponse({ ok: false, error: "Couldn't start payment" }, 400);
     }
@@ -430,16 +431,13 @@ async function confirmLegacyCapture(
 async function markLegacyHold(
   existing: Stripe.PaymentIntent,
   service: SupabaseClient,
+  stripe: Stripe,
   keepReservation: () => void,
 ): Promise<Response> {
   keepReservation();
-  const method = existing.payment_method;
-  const methodId = typeof method === 'string' ? method : method?.id ?? null;
-  const { error } = await service.rpc('mark_join_authorized', {
-    p_payment_intent_id: existing.id,
-    p_payment_method_id: methodId,
-    p_capture_before: null,
-  });
-  if (error) throw error;
+  const result = await authorizeJoin(service, stripe, existing, 'create-join-payment');
+  if (result === 'canceled') {
+    return jsonResponse({ ok: false, error: "Couldn't start payment" }, 400);
+  }
   return jsonResponse({ ok: false, error: ALREADY_JOINED }, 400);
 }

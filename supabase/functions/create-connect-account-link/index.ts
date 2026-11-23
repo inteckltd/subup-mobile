@@ -61,6 +61,7 @@ function stripeParam(error: unknown): string | undefined {
 Deno.serve(async (req) => {
   const auth = await requireUserId(req);
   if (auth instanceof Response) return auth;
+  const userId = auth.userId;
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -123,7 +124,7 @@ Deno.serve(async (req) => {
       payouts_enabled?: boolean | null;
     }) {
       await service.rpc('upsert_stripe_account', {
-        p_user_id: auth.userId,
+        p_user_id: userId,
         p_stripe_account_id: account.id,
         p_charges_enabled: account.charges_enabled ?? false,
         p_payouts_enabled: account.payouts_enabled ?? false,

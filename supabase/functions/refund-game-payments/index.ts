@@ -1,11 +1,16 @@
-// Refund every succeeded payment on a cancelled game. JWT caller must be
-// able to see the game (member). Used after cancel_game and by apply-game-lock.
-// Skips once the game has started or the treasurer bank payout has been created.
+// Refund every succeeded payment on a cancelled game, and cancel holds.
+//
+// The caller must be an admin of the game's group and the game must already
+// be cancelled (cancel_game did that). 1.0.6 calls this only after that, as
+// an admin. apply-game-lock does not invoke this function: it calls
+// releaseOutstandingCancelledGame directly with the service role, on the
+// same cron secret as the rest of the lock sweep.
 
+import { authorizeRefundGamePayments, cancelledGameNeedsRefundSweep } from '../_shared/payment-hotfix.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
+import { releaseOutstandingCancelledGame } from '../_shared/lock-runner.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
-import { cancelUncapturedPayments } from '../_shared/lock-runner.ts';
-import { createAnonClient, getStripe, jsonResponse, refundSucceededPayments, requireUserId } from '../_shared/stripe.ts';
+import { getStripe, jsonResponse, requireUserId } from '../_shared/stripe.ts';
 
 Deno.serve(async (req) => {
   const auth = await requireUserId(req);
@@ -29,30 +34,50 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const anon = createAnonClient(req);
-    const { data: game, error: gameError } = await anon
+    const service = createServiceClient(supabaseUrl, serviceRoleKey);
+    const { data: game, error: gameError } = await service
       .from('games')
-      .select('id, status')
+      .select('id, status, group_id, starts_at, treasurer_payout_id')
       .eq('id', gameId)
       .maybeSingle();
-    if (gameError || !game) {
-      return jsonResponse({ ok: false, error: 'Game not found' }, 404);
+    if (gameError) throw gameError;
+
+    let callerIsGroupAdmin = false;
+    if (game?.group_id) {
+      const { data: member, error: memberError } = await service
+        .from('group_members')
+        .select('role')
+        .eq('group_id', game.group_id)
+        .eq('user_id', auth.userId)
+        .maybeSingle();
+      if (memberError) throw memberError;
+      callerIsGroupAdmin = member?.role === 'admin';
+    }
+
+    const decision = authorizeRefundGamePayments({
+      gameFound: !!game,
+      status: game?.status ?? null,
+      callerIsGroupAdmin,
+    });
+    if (!decision.ok) {
+      return jsonResponse({ ok: false, error: decision.error }, decision.httpStatus);
+    }
+
+    if (!game || !cancelledGameNeedsRefundSweep({
+      status: game.status,
+      startsAt: game.starts_at,
+      treasurerPayoutId: game.treasurer_payout_id,
+    }, Date.now())) {
+      return jsonResponse({ ok: true, refunded: 0, skipped: 'outside_window' });
     }
 
     const stripe = getStripe();
-    const service = createServiceClient(supabaseUrl, serviceRoleKey);
-    const { data: locked } = await service
-      .from('games')
-      .select('starts_at, treasurer_payout_id')
-      .eq('id', gameId)
-      .maybeSingle();
-    const started = locked?.starts_at ? new Date(locked.starts_at).getTime() <= Date.now() : false;
-    if (locked?.treasurer_payout_id || started) {
-      return jsonResponse({ ok: true, refunded: 0, skipped: 'started' });
-    }
-    const refunded = await refundSucceededPayments(service, stripe, gameId);
-    await cancelUncapturedPayments(service, stripe, gameId);
-    return jsonResponse({ ok: true, refunded });
+    // An explicit admin call retries rows the cron has given up on.
+    const { released } = await releaseOutstandingCancelledGame(service, stripe, gameId, {
+      manual: true,
+      source: 'refund-game-payments',
+    });
+    return jsonResponse({ ok: true, refunded: released });
   } catch (error) {
     await captureEdgeError('refund-game-payments', error);
     return jsonResponse({ ok: false, error: 'Could not refund payments' }, 500);

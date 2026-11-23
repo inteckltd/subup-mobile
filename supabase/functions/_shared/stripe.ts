@@ -1,6 +1,12 @@
 import Stripe from 'npm:stripe@17.7.0';
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
+export {
+  isIdempotentRefundError,
+  refundPaymentIntent,
+  refundSucceededPayments,
+} from './refunds.ts';
+
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, stripe-signature',
@@ -53,56 +59,6 @@ export async function requireUserId(req: Request): Promise<{ userId: string } | 
     return jsonResponse({ ok: false, error: 'Unauthorized' }, 401);
   }
   return { userId: data.user.id };
-}
-
-export function isIdempotentRefundError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /already been refunded|charge_already_refunded|already been reversed|transfer_already_reversed|has already been reversed|amount_too_large/i.test(
-    message,
-  );
-}
-
-type MaybeDeletedCharge = { deleted?: boolean; transfer?: string | { id: string } | null };
-
-function chargeTransferId(charge: Stripe.Charge | MaybeDeletedCharge | string | null): string | null {
-  if (!charge || typeof charge === 'string') return null;
-  if ('deleted' in charge && charge.deleted) return null;
-  const transfer = charge.transfer;
-  if (!transfer) return null;
-  return typeof transfer === 'string' ? transfer : transfer.id;
-}
-
-/**
- * Refund the pitch to the player and pull it back from the treasurer.
- * SubUp keeps the application fee. Do not use reverse_transfer on a partial
- * refund — Stripe would only reverse a proportional share of the transfer.
- */
-export async function refundPaymentIntent(stripe: Stripe, paymentIntentId: string, pitchCents: number) {
-  if (pitchCents <= 0) return;
-
-  const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
-    expand: ['latest_charge.transfer'],
-  });
-  let latest = pi.latest_charge;
-  if (typeof latest === 'string') {
-    latest = await stripe.charges.retrieve(latest, { expand: ['transfer'] });
-  }
-  const transferId = chargeTransferId(latest);
-
-  if (transferId) {
-    try {
-      await stripe.transfers.createReversal(transferId, { amount: pitchCents });
-    } catch (reversalError) {
-      if (!isIdempotentRefundError(reversalError)) throw reversalError;
-    }
-  }
-
-  await stripe.refunds.create({
-    payment_intent: paymentIntentId,
-    amount: pitchCents,
-    refund_application_fee: false,
-    reverse_transfer: false,
-  });
 }
 
 /** Keep pitch money on Connect until we explicitly payout after kickoff. */
@@ -164,26 +120,3 @@ export async function payoutDueTreasurerGames(service: SupabaseClient, stripe: S
   return paid;
 }
 
-export async function refundSucceededPayments(
-  service: SupabaseClient,
-  stripe: Stripe,
-  gameId: string,
-): Promise<number> {
-  const { data, error } = await service.rpc('list_succeeded_game_payments', { p_game_id: gameId });
-  if (error) throw error;
-  const rows = (data ?? []) as { stripe_payment_intent_id: string; pitch_cents: number }[];
-  let refunded = 0;
-  for (const row of rows) {
-    try {
-      await refundPaymentIntent(stripe, row.stripe_payment_intent_id, row.pitch_cents);
-    } catch (refundError) {
-      if (!isIdempotentRefundError(refundError)) throw refundError;
-    }
-    const { error: markError } = await service.rpc('mark_game_payment_refunded', {
-      p_payment_intent_id: row.stripe_payment_intent_id,
-    });
-    if (markError) throw markError;
-    refunded += 1;
-  }
-  return refunded;
-}
