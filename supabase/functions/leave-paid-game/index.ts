@@ -59,7 +59,18 @@ Deno.serve(async (req) => {
     }
 
     const stripe = getStripe();
-    if (player.stripe_payment_intent_id) {
+    const paymentIntentId = player.stripe_payment_intent_id;
+    if (paymentIntentId && (player.payment_status === 'authorized' || player.payment_status === 'card_saved')) {
+      // Detach before Stripe cancels. Otherwise payment_intent.canceled tells
+      // the player their hold expired, which is the wrong message for a leave.
+      const { error: detachError } = await service
+        .from('game_players')
+        .update({ stripe_payment_intent_id: null, payment_status: 'card_saved' })
+        .eq('id', player.id)
+        .eq('stripe_payment_intent_id', paymentIntentId);
+      if (detachError) throw detachError;
+    }
+    if (paymentIntentId) {
       const { data: payment, error: paymentError } = await service
         .from('game_payments')
         .select('pitch_cents')
@@ -73,9 +84,15 @@ Deno.serve(async (req) => {
         return jsonResponse({ ok: false, error: "Couldn't refund this payment. Please try again." }, 400);
       }
       try {
-        await refundCapturedOrCancel(stripe, service, player.stripe_payment_intent_id, payment?.pitch_cents ?? null);
+        await refundCapturedOrCancel(stripe, service, paymentIntentId, payment?.pitch_cents ?? null);
       } catch (releaseError) {
         if (!isIdempotentRefundError(releaseError)) {
+          if (player.payment_status === 'authorized' || player.payment_status === 'card_saved') {
+            await service
+              .from('game_players')
+              .update({ stripe_payment_intent_id: paymentIntentId, payment_status: player.payment_status })
+              .eq('id', player.id);
+          }
           await captureEdgeError('leave-paid-game', releaseError);
           const message = releaseError instanceof Error ? releaseError.message : '';
           const refundFailed = player.payment_status === 'paid' || /pitch amount/i.test(message);
@@ -87,13 +104,21 @@ Deno.serve(async (req) => {
           }, 400);
         }
       }
+      const { error: clearError } = await service
+        .from('game_players')
+        .update({
+          stripe_payment_intent_id: null,
+          payment_status: player.payment_status === 'paid' ? 'refunded' : 'card_saved',
+        })
+        .eq('id', player.id);
+      if (clearError) throw clearError;
     }
 
     const anon = createAnonClient(req);
     const { data: promotedUserId, error: leaveError } = await anon.rpc('leave_game', { p_game_id: gameId });
     if (leaveError) {
       const message = leaveError.message ?? '';
-      if (/haven't joined|can't leave within|Game not found/i.test(message)) {
+      if (/haven't joined|can't leave within|Game not found|Refund the payment/i.test(message)) {
         return jsonResponse({ ok: false, error: message }, 400);
       }
       throw leaveError;

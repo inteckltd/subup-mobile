@@ -10,6 +10,7 @@ import {
   formatLockDeadline,
   gameEndsAt,
   hasGameEnded,
+  hoursUntilStart,
   isInsideLockWindow,
   lockDeadlineAt,
 } from '../../../src/lib/format';
@@ -157,14 +158,22 @@ export default function GameDetailsScreen() {
   const awayPlayers = confirmedPlayers.filter((player) => player.team === 'away');
   const unassignedPlayers = confirmedPlayers.filter((player) => !player.team);
 
-  const canJoinOpen = !game.hasJoined && game.status === 'open' && game.spotsTaken < game.maxPlayers && !confirmed;
+  const joiningClosed =
+    lockHours > 0 &&
+    hoursUntilStart(game.startsAt, now) <= lockHours &&
+    (game.status === 'open' || game.status === 'full') &&
+    !teamsPicked &&
+    !isCancelled;
+  const canJoinOpen =
+    !game.hasJoined && game.status === 'open' && game.spotsTaken < game.maxPlayers && !confirmed && !joiningClosed;
   const canJoinWaitlist =
     !game.hasJoined &&
     (game.status === 'full' || game.spotsTaken >= game.maxPlayers) &&
     game.allowWaitlist &&
     game.status !== 'cancelled' &&
     game.status !== 'completed' &&
-    !confirmed;
+    !confirmed &&
+    !joiningClosed;
   const isFullNoWaitlist =
     !game.hasJoined && (game.status === 'full' || game.spotsTaken >= game.maxPlayers) && !game.allowWaitlist && !confirmed;
   const leaveLocked = insideLock && game.hasJoined && !game.isWaitlisted;
@@ -253,7 +262,7 @@ export default function GameDetailsScreen() {
                           ? 'Holds will be released and nobody new is charged. Anyone already charged gets the pitch back. The SubUp fee on a captured payment is not refunded.'
                           : game.teamsPickedAt
                             ? 'Everyone who joined will be notified. Paid players get the pitch back; the SubUp fee is not refunded. You can’t undo this.'
-                            : 'Holds will be released. Nobody is charged. You can’t undo this.',
+                            : 'Players who paid up front get their pitch money back. Card holds are released. You can’t undo this.',
                         [
                           { text: 'Keep game', style: 'cancel' },
                           {
@@ -499,7 +508,7 @@ export default function GameDetailsScreen() {
             <Text className="font-sans-bold text-lg text-[#92400E]">This game is short</Text>
             <Text className="font-sans text-sm text-[#92400E]">
               {game.isAdmin
-                ? `Some cards could not be held, so you're under the minimum of ${game.minPlayers}. ${game.spotsCommitted} ${game.spotsCommitted === 1 ? 'player is' : 'players are'} still held and have not been charged. Go ahead short, or cancel and release every hold.`
+                ? `Some cards could not be held, so you're under the minimum of ${game.minPlayers}. ${game.spotsCommitted} ${game.spotsCommitted === 1 ? 'player still has' : 'players still have'} a card hold and ${game.spotsCommitted === 1 ? 'has' : 'have'} not been charged. Players who paid up front keep their place. Go ahead short, or cancel.`
                 : "The organiser is deciding whether this game goes ahead. Your card is only on hold until they confirm. You haven't been charged."}
             </Text>
             {game.isAdmin ? (
@@ -547,7 +556,7 @@ export default function GameDetailsScreen() {
               <Text className="font-sans-bold text-xs text-[#92400E]">Short of the minimum</Text>
               <Text className="font-sans text-xs leading-5 text-[#B45309]">
                 This game needs {needed} more {needed === 1 ? 'player' : 'players'} by {formatLockDeadline(game.startsAt, lockHours)}, or
-                it is cancelled and nobody is charged.
+                it is cancelled. Players who paid up front get their pitch money back, and card holds are released.
               </Text>
             </View>
           </View>
@@ -654,11 +663,35 @@ export default function GameDetailsScreen() {
           ) : canJoinOpen ? (
             <PrimaryButton label="Join Game" loading={pending} onPress={join} />
           ) : game.hasJoined && (game.myPaymentStatus === 'pending' || game.myNeedsCardConfirm) && !game.isWaitlisted ? (
-            <PrimaryButton
-              label={stayLabel}
-              loading={pending}
-              onPress={payAndJoin}
-            />
+            <View className="w-full gap-3">
+              <PrimaryButton
+                label={stayLabel}
+                loading={pending}
+                onPress={payAndJoin}
+              />
+              {leaveLocked ? (
+                <View className="flex-row items-center justify-center gap-1.5 px-2">
+                  <Ionicons name="lock-closed" size={14} color={colors.muted} />
+                  <Text className="shrink font-sans-bold text-sm text-muted">
+                    You can’t leave within {lockHours} hours of kickoff
+                  </Text>
+                </View>
+              ) : (
+                <PrimaryButton
+                  label="Leave Game"
+                  variant="outline"
+                  loading={pending}
+                  onPress={() => {
+                    confirmLeaveGame({
+                      isWaitlisted: false,
+                      paid: game.priceCents > 0,
+                      paymentStatus: game.myPaymentStatus,
+                      onLeave: () => leave(game.priceCents > 0),
+                    });
+                  }}
+                />
+              )}
+            </View>
           ) : canJoinWaitlist ? (
             <PrimaryButton label="Join Waitlist" loading={pending} onPress={join} />
           ) : isFullNoWaitlist ? (
@@ -669,6 +702,15 @@ export default function GameDetailsScreen() {
                 <Ionicons name="lock-closed" size={14} color={colors.muted} />
                 <Text className="shrink font-sans-bold text-sm text-muted">
                   You can’t leave within {lockHours} hours of kickoff
+                </Text>
+              </View>
+            </View>
+          ) : joiningClosed && !game.hasJoined ? (
+            <View className="items-center gap-1 py-2">
+              <View className="flex-row items-center justify-center gap-1.5 px-2">
+                <Ionicons name="lock-closed" size={14} color={colors.muted} />
+                <Text className="shrink font-sans-bold text-sm text-muted">
+                  Joining closes {lockHours} hours before kickoff
                 </Text>
               </View>
             </View>

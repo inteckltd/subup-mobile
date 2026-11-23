@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { authorizeJoin, confirmPaidJoin, noteJoinPaymentFailed, placeDueOffSessionHolds, releaseOutstandingCancelledGame, sweepCancelledGameRefunds } from './lock-runner.ts';
+import { authorizeJoin, cancelDetachedHolds, cancelUndecidedShortGames, claimLockNotificationPushes, confirmPaidJoin, noteJoinPaymentFailed, placeDueOffSessionHolds, releaseOutstandingCancelledGame, settleLocksBeforeSql, sweepCancelledGameRefunds, tidyOrphanedSetupIntents } from './lock-runner.ts';
 import { REFUND_ABANDONED_TITLE } from './payment-hotfix.ts';
 import { refundPaymentIntent } from './refunds.ts';
 
@@ -67,7 +67,10 @@ function orMatches(expression: string, row: Row): boolean {
   });
 }
 
-type Filter = { kind: 'eq' | 'neq' | 'in' | 'gt' | 'gte' | 'lt' | 'is'; column: string; value: unknown } | { kind: 'or'; expression: string };
+type Filter =
+  | { kind: 'eq' | 'neq' | 'in' | 'gt' | 'gte' | 'lt' | 'lte' | 'is'; column: string; value: unknown }
+  | { kind: 'not'; column: string; operator: string; value: unknown }
+  | { kind: 'or'; expression: string };
 
 function matches(row: Row, filters: Filter[]): boolean {
   return filters.every((filter) => {
@@ -78,8 +81,13 @@ function matches(row: Row, filters: Filter[]): boolean {
     if (filter.kind === 'in') return (filter.value as unknown[]).includes(value);
     if (filter.kind === 'is') return filter.value == null ? value == null : value === filter.value;
     if (value == null) return false;
+    if (filter.kind === 'not') {
+      if (filter.operator === 'is' && filter.value == null) return value != null;
+      return value !== filter.value;
+    }
     if (filter.kind === 'gt') return String(value) > String(filter.value);
     if (filter.kind === 'lt') return String(value) < String(filter.value);
+    if (filter.kind === 'lte') return String(value) <= String(filter.value);
     return String(value) >= String(filter.value);
   });
 }
@@ -134,6 +142,14 @@ function query(db: Database, table: keyof Database) {
       filters.push({ kind: 'lt', column, value });
       return builder;
     },
+    lte(column: string, value: unknown) {
+      filters.push({ kind: 'lte', column, value });
+      return builder;
+    },
+    not(column: string, operator: string, value: unknown) {
+      filters.push({ kind: 'not', column, operator, value });
+      return builder;
+    },
     or(expression: string) {
       filters.push({ kind: 'or', expression });
       return builder;
@@ -158,6 +174,7 @@ function query(db: Database, table: keyof Database) {
     const found = rows().filter((row) => matches(row, filters));
     if (mode === 'update' && patch) {
       for (const row of found) Object.assign(row, patch);
+      if (selected) return { data: found.map((row) => project(row, selected)), error: null };
       return { data: null, error: null };
     }
     if (single) {
@@ -250,6 +267,40 @@ function ledgerRpc(db: Database) {
     }
     if (name === 'list_players_due_offsession_hold') {
       return { data: db.dueHolds, error: null };
+    }
+    if (name === 'list_games_at_lock') {
+      return {
+        data: db.games.filter((game) => game.at_lock).map((game) => ({
+          game_id: game.id,
+          group_id: game.group_id ?? 'grp',
+          title: game.title ?? 'Tuesday',
+          min_players: game.min_players,
+          price_cents: game.price_cents ?? 1000,
+          shortfall_at: game.shortfall_at ?? null,
+        })),
+        error: null,
+      };
+    }
+    if (name === 'drop_unpaid_player') {
+      const index = db.game_players.findIndex((row) => row.id === args.p_game_player_id);
+      if (index >= 0) db.game_players.splice(index, 1);
+      return { data: null, error: null };
+    }
+    if (name === 'mark_game_shortfall') {
+      const game = db.games.find((row) => row.id === args.p_game_id);
+      if (game && !game.shortfall_at) game.shortfall_at = new Date().toISOString();
+      return { data: null, error: null };
+    }
+    if (name === 'promote_waitlist_if_going_ahead') {
+      const game = db.games.find((row) => row.id === args.p_game_id);
+      if (!game || game.status === 'cancelled' || (game.shortfall_at && !game.shortfall_confirmed_at)) {
+        return { data: null, error: null };
+      }
+      const waiting = db.game_players.find((row) => row.game_id === args.p_game_id && row.is_waitlisted);
+      if (!waiting) return { data: null, error: null };
+      waiting.is_waitlisted = false;
+      waiting.payment_status = 'pending';
+      return { data: waiting.user_id, error: null };
     }
     throw new Error(`unexpected rpc ${name}`);
   };
@@ -753,6 +804,7 @@ test('a null kickoff is not swept, and a game past 30 days is alerted once', asy
   db.game_payments.push(
     succeededPayment('nullpay', 'g-null', 'gp-null'),
     succeededPayment('old', 'g-old', 'gp-old'),
+    { ...succeededPayment('hold-old', 'g-old', 'gp-hold-old'), status: 'requires_capture' },
   );
   const harness = sweepStripe();
   const service = serviceFor(db, ledgerRpc(db));
@@ -771,6 +823,7 @@ test('a null kickoff is not swept, and a game past 30 days is alerted once', asy
   assert.equal(alerts.some((line) => line.includes('g-null')), false);
   assert.equal(typeof db.games.find((row) => row.id === 'g-old')?.refund_window_alerted_at, 'string');
   assert.equal(db.game_payments.find((row) => row.id === 'old')?.status, 'succeeded');
+  assert.equal(db.game_payments.find((row) => row.id === 'hold-old')?.refund_abandoned_at ?? null, null);
 });
 
 test('heal alerts from the webhook are tagged with that caller', async () => {
@@ -906,4 +959,211 @@ test('a failed off-session confirm reads the PaymentIntent before cancelling', a
   assert.deepEqual(dead.log, ['confirm', 'retrieve', 'cancel']);
   assert.equal(dead.db.game_players[0].stripe_payment_intent_id, null);
   assert.equal(dead.db.notifications.length, 1);
+});
+
+function lockGame(id: string, minPlayers: number) {
+  return {
+    id,
+    at_lock: true,
+    status: 'open',
+    group_id: 'grp',
+    title: 'Tuesday',
+    min_players: minPlayers,
+    price_cents: 1000,
+    shortfall_at: null as string | null,
+    shortfall_confirmed_at: null as string | null,
+  };
+}
+
+test('migration 042 closes joining, guards leave, and will not pick unsettled teams', () => {
+  const sql = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../../migrations/042_payment_107.sql'),
+    'utf8',
+  );
+  assert.equal(sql.includes("and v_paid >= v_game.min_players then"), false);
+  assert.equal(sql.split('Joining is closed. The list locks before kickoff').length - 1, 2);
+  assert.match(sql, /Refund the payment before leaving this game/);
+  assert.equal(sql.split("action := 'unsettled'").length - 1, 2);
+  assert.match(sql, /promote_waitlist_if_going_ahead/);
+  assert.match(sql, /add column if not exists pushed_at/);
+  assert.match(sql, /release_holds_when_lock_moves/);
+  assert.match(sql, /did not get a decision by kickoff/);
+});
+
+test('lock drops a saved card on confirm and on a short game, and one failure does not stop the next', async () => {
+  const db = emptyDb();
+  db.games.push(lockGame('bad', 1), lockGame('going', 1), lockGame('short', 2));
+  db.game_players.push(
+    { id: 'bad-player', game_id: 'bad', user_id: 'u-bad', payment_status: 'authorized', stripe_payment_intent_id: 'pi_bad', is_waitlisted: false },
+    { id: 'going-paid', game_id: 'going', user_id: 'u-paid', payment_status: 'paid', stripe_payment_intent_id: 'pi_paid', is_waitlisted: false },
+    { id: 'going-saved', game_id: 'going', user_id: 'u-saved', payment_status: 'card_saved', stripe_payment_intent_id: null, is_waitlisted: false },
+    { id: 'going-wait', game_id: 'going', user_id: 'u-wait', payment_status: 'unpaid', is_waitlisted: true },
+    { id: 'short-held', game_id: 'short', user_id: 'u-held', payment_status: 'authorized', stripe_payment_intent_id: 'pi_short', is_waitlisted: false },
+    { id: 'short-saved', game_id: 'short', user_id: 'u-card', payment_status: 'card_saved', stripe_payment_intent_id: null, is_waitlisted: false },
+    { id: 'short-wait', game_id: 'short', user_id: 'u-queue', payment_status: 'unpaid', is_waitlisted: true },
+  );
+  const stripe = {
+    paymentIntents: {
+      retrieve: async (id: string) => {
+        if (id === 'pi_bad') throw new Error('stripe down');
+        return { id, status: 'requires_capture', latest_charge: null };
+      },
+      capture: async () => { throw new Error('should not capture'); },
+      cancel: async (id: string) => ({ id, status: 'canceled' }),
+    },
+  };
+  await settleLocksBeforeSql(serviceFor(db, ledgerRpc(db)) as never, stripe as never);
+  assert.equal(db.game_players.some((row) => row.id === 'bad-player'), true);
+  assert.equal(db.game_players.some((row) => row.id === 'going-saved'), false);
+  assert.equal(db.game_players.find((row) => row.id === 'going-wait')?.is_waitlisted, false);
+  assert.equal(db.game_players.find((row) => row.id === 'going-wait')?.payment_status, 'pending');
+  assert.equal(db.game_players.some((row) => row.id === 'short-saved'), false);
+  assert.equal(db.game_players.find((row) => row.id === 'short-wait')?.is_waitlisted, true);
+  assert.equal(db.games.find((row) => row.id === 'short')?.shortfall_at, null);
+});
+
+test('a capture error is a decline only when Stripe says the PaymentIntent failed', async () => {
+  async function run(script: 'succeeded-after-error' | 'declined' | 'still-open') {
+    const db = emptyDb();
+    const keys: string[] = [];
+    const cancels: string[] = [];
+    let status = 'requires_capture';
+    db.games.push(lockGame('g1', 1));
+    db.game_players.push({
+      id: 'gp1', game_id: 'g1', user_id: 'u1', payment_status: 'authorized',
+      stripe_payment_intent_id: 'pi_cap', is_waitlisted: false,
+    });
+    const stripe = {
+      paymentIntents: {
+        retrieve: async (id: string) => ({
+          id, status, latest_charge: status === 'succeeded' ? { id: 'ch_1' } : null,
+        }),
+        capture: async (_id: string, _body: unknown, options?: { idempotencyKey?: string }) => {
+          keys.push(options?.idempotencyKey ?? '');
+          if (script === 'succeeded-after-error') status = 'succeeded';
+          if (script === 'declined') status = 'requires_payment_method';
+          throw new Error('timeout');
+        },
+        cancel: async (id: string) => {
+          cancels.push(id);
+          return { id, status: 'canceled' };
+        },
+      },
+    };
+    await settleLocksBeforeSql(serviceFor(db, ledgerRpc(db)) as never, stripe as never);
+    return { db, keys, cancels };
+  }
+
+  const recovered = await run('succeeded-after-error');
+  assert.deepEqual(recovered.keys, ['capture:pi_cap']);
+  assert.deepEqual(recovered.cancels, []);
+  assert.equal(recovered.db.game_players[0]?.payment_status, 'paid');
+
+  const declined = await run('declined');
+  assert.deepEqual(declined.keys, ['capture:pi_cap']);
+  assert.deepEqual(declined.cancels, ['pi_cap']);
+  assert.equal(declined.db.game_players.length, 0);
+
+  const open = await run('still-open');
+  assert.deepEqual(open.keys, ['capture:pi_cap', 'capture:pi_cap:retry']);
+  assert.deepEqual(open.cancels, []);
+  assert.equal(open.db.game_players[0]?.payment_status, 'authorized');
+});
+
+test('an undecided short game is cancelled at kickoff and not before', async () => {
+  const db = emptyDb();
+  const past = new Date(Date.now() - 60_000).toISOString();
+  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  db.games.push(
+    { id: 'past', status: 'open', starts_at: past, shortfall_at: past, shortfall_confirmed_at: null, teams_picked_at: null },
+    { id: 'future', status: 'open', starts_at: future, shortfall_at: past, shortfall_confirmed_at: null, teams_picked_at: null },
+  );
+  const cancelled = await cancelUndecidedShortGames(serviceFor(db, ledgerRpc(db)) as never);
+  assert.deepEqual(cancelled, ['past']);
+  assert.equal(db.games.find((row) => row.id === 'past')?.status, 'cancelled');
+  assert.equal(db.games.find((row) => row.id === 'future')?.status, 'open');
+});
+
+test('each shortfall and card push is claimed once', async () => {
+  const db = emptyDb();
+  const createdAt = new Date().toISOString();
+  db.notifications.push(
+    { id: 'card', user_id: 'u1', title: 'Card declined', body: 'Try another card', data: { type: 'card_declined', gameId: 'g1' }, pushed_at: null, created_at: createdAt },
+    { id: 'other', user_id: 'u1', title: 'Cancelled', body: 'Gone', data: { type: 'game_cancelled', gameId: 'other' }, pushed_at: null, created_at: createdAt },
+  );
+  const service = serviceFor(db, ledgerRpc(db));
+  const first = await claimLockNotificationPushes(service as never, ['g1']);
+  const second = await claimLockNotificationPushes(service as never, ['g1']);
+  assert.deepEqual(first.map((row) => row.id), ['card']);
+  assert.deepEqual(second, []);
+  assert.equal(typeof db.notifications.find((row) => row.id === 'card')?.pushed_at, 'string');
+  assert.equal(db.notifications.find((row) => row.id === 'other')?.pushed_at ?? null, null);
+});
+
+test('a hold with no player left is cancelled, and one still attached is not', async () => {
+  const db = emptyDb();
+  const cancels: string[] = [];
+  db.game_payments.push(
+    { id: 'loose', status: 'requires_capture', stripe_payment_intent_id: 'pi_loose' },
+    { id: 'held', status: 'requires_capture', stripe_payment_intent_id: 'pi_held' },
+    { id: 'taken', status: 'requires_capture', stripe_payment_intent_id: 'pi_taken' },
+  );
+  db.game_players.push({ id: 'gp', stripe_payment_intent_id: 'pi_held' });
+  const stripe = {
+    paymentIntents: {
+      retrieve: async (id: string) => ({ id, status: id === 'pi_taken' ? 'succeeded' : 'requires_capture' }),
+      cancel: async (id: string) => {
+        cancels.push(id);
+        return { id, status: 'canceled' };
+      },
+    },
+  };
+  const count = await cancelDetachedHolds(serviceFor(db, ledgerRpc(db)) as never, stripe as never);
+  assert.equal(count, 1);
+  assert.deepEqual(cancels, ['pi_loose']);
+  assert.equal(db.game_payments.find((row) => row.id === 'loose')?.status, 'canceled');
+  assert.equal(db.game_payments.find((row) => row.id === 'held')?.status, 'requires_capture');
+  assert.equal(db.game_payments.find((row) => row.id === 'taken')?.status, 'requires_capture');
+});
+
+test('an existing off-session PaymentIntent is reused instead of creating another', async () => {
+  const db = emptyDb();
+  const log: string[] = [];
+  db.game_players.push({
+    id: 'gp1', game_id: 'g1', user_id: 'u1', payment_status: 'card_saved', stripe_payment_intent_id: 'pi_existing',
+  });
+  db.dueHolds.push(dueHoldRow());
+  const stripe = {
+    paymentIntents: {
+      create: async () => { log.push('create'); return { id: 'pi_new', status: 'requires_confirmation' }; },
+      retrieve: async (id: string) => ({ id, status: 'requires_capture', latest_charge: null, payment_method: 'pm_1' }),
+      confirm: async () => { log.push('confirm'); return { id: 'pi_existing', status: 'requires_capture' }; },
+      cancel: async (id: string) => { log.push(`cancel:${id}`); return { id, status: 'canceled' }; },
+    },
+  };
+  await placeDueOffSessionHolds(serviceFor(db, ledgerRpc(db)) as never, stripe as never);
+  assert.deepEqual(log, []);
+  assert.equal(db.game_players[0].payment_status, 'authorized');
+  assert.equal(db.game_players[0].stripe_payment_intent_id, 'pi_existing');
+});
+
+test('a SetupIntent with no player left is cancelled and the ledger row expires', async () => {
+  const db = emptyDb();
+  const cancels: string[] = [];
+  db.game_players.push({ id: 'still-here', game_id: 'g1', user_id: 'u1', payment_status: 'card_saved' });
+  db.game_payments.push(
+    { id: 'orphan', status: 'card_saved', stripe_payment_intent_id: null, stripe_setup_intent_id: 'seti_orphan', game_player_id: 'gone' },
+    { id: 'live', status: 'card_saved', stripe_payment_intent_id: null, stripe_setup_intent_id: 'seti_live', game_player_id: 'still-here' },
+  );
+  const stripe = {
+    setupIntents: {
+      retrieve: async (id: string) => ({ id, status: 'requires_payment_method' }),
+      cancel: async (id: string) => { cancels.push(id); return { id, status: 'canceled' }; },
+    },
+  };
+  const tidied = await tidyOrphanedSetupIntents(serviceFor(db, ledgerRpc(db)) as never, stripe as never);
+  assert.equal(tidied, 1);
+  assert.deepEqual(cancels, ['seti_orphan']);
+  assert.equal(db.game_payments.find((row) => row.id === 'orphan')?.status, 'expired');
+  assert.equal(db.game_payments.find((row) => row.id === 'live')?.status, 'card_saved');
 });

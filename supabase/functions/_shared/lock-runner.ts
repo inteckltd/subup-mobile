@@ -13,6 +13,7 @@ import {
   chargeIsFullyRefunded,
   classifyIntentForExpiry,
   ledgerStatusAfterPaymentFailure,
+  lockNotificationShouldPush,
   nextRefundSweepBackoff,
   offSessionHoldIsDead,
   offSessionHoldIsLive,
@@ -201,6 +202,28 @@ export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: S
     if (!row.stripe_customer_id || !row.stripe_payment_method_id || !row.stripe_account_id) continue;
     let paymentIntentId: string | null = null;
     try {
+      const { data: seat, error: seatError } = await service
+        .from('game_players')
+        .select('stripe_payment_intent_id')
+        .eq('id', row.game_player_id)
+        .maybeSingle();
+      if (seatError) throw seatError;
+      const existingId = (seat as { stripe_payment_intent_id?: string | null } | null)?.stripe_payment_intent_id ?? null;
+      if (existingId) {
+        // A hold was already created for this seat. Reuse it. Creating
+        // another PaymentIntent would charge the card twice.
+        paymentIntentId = existingId;
+        const existing = await stripe.paymentIntents.retrieve(existingId);
+        if (await settleLiveOffSessionHold(service, stripe, existing)) continue;
+        if (offSessionHoldIsLive(existing.status)) continue;
+        if (offSessionHoldIsDead(existing.status)) {
+          await abandonDeadOffSessionHold(service, stripe, row, existing);
+          continue;
+        }
+        await service.rpc('mark_offsession_attempted', { p_game_player_id: row.game_player_id });
+        await notifyCardConfirm(service, row);
+        continue;
+      }
       // Attach the ledger row before the PaymentIntent can become
       // requires_capture. Confirming in the create call lets
       // amount_capturable_updated win the race and cancel a hold that has
@@ -289,28 +312,64 @@ async function classifyHold(
   return 'dead';
 }
 
+async function confirmCapturedIntent(
+  stripe: Stripe,
+  service: SupabaseClient,
+  intent: Stripe.PaymentIntent,
+): Promise<'captured' | 'failed'> {
+  const result = await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
+  return result === 'skipped_refunded' ? 'failed' : 'captured';
+}
+
+/**
+ * Capture one hold. A thrown capture is not a decline until Stripe says the
+ * PaymentIntent is dead. A timeout can leave it requires_capture, and the
+ * first idempotency key then replays that error for 24 hours, so the genuine
+ * retry uses a second key.
+ */
 async function captureOne(
   stripe: Stripe,
   service: SupabaseClient,
   paymentIntentId: string,
-): Promise<'captured' | 'failed' | 'dead'> {
+): Promise<'captured' | 'failed' | 'pending'> {
+  const seen = await readCaptureState(stripe, service, paymentIntentId);
+  if (seen !== 'ready') return seen;
+  const first = await tryCapture(stripe, service, paymentIntentId, `capture:${paymentIntentId}`);
+  if (first !== 'error') return first;
+  const afterFirst = await readCaptureState(stripe, service, paymentIntentId);
+  if (afterFirst !== 'ready') return afterFirst;
+  const second = await tryCapture(stripe, service, paymentIntentId, `capture:${paymentIntentId}:retry`);
+  if (second !== 'error') return second;
+  const afterSecond = await readCaptureState(stripe, service, paymentIntentId);
+  return afterSecond === 'ready' ? 'pending' : afterSecond;
+}
+
+async function readCaptureState(
+  stripe: Stripe,
+  service: SupabaseClient,
+  paymentIntentId: string,
+): Promise<'captured' | 'failed' | 'pending' | 'ready'> {
   const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
-  if (intent.status === 'succeeded') {
-    const result = await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
-    return result === 'skipped_refunded' ? 'dead' : 'captured';
-  }
-  if (intent.status !== 'requires_capture') return 'dead';
+  if (intent.status === 'succeeded') return confirmCapturedIntent(stripe, service, intent);
+  if (intent.status === 'processing') return 'pending';
+  if (intent.status === 'requires_capture') return 'ready';
+  return 'failed';
+}
+
+async function tryCapture(
+  stripe: Stripe,
+  service: SupabaseClient,
+  paymentIntentId: string,
+  idempotencyKey: string,
+): Promise<'captured' | 'failed' | 'pending' | 'error'> {
   try {
-    const captured = await stripe.paymentIntents.capture(
-      paymentIntentId,
-      {},
-      { idempotencyKey: `capture:${paymentIntentId}` },
-    );
-    const result = await confirmPaidJoin(service, stripe, captured.id, paymentIntentChargeId(captured.latest_charge));
-    return result === 'skipped_refunded' ? 'dead' : 'captured';
+    const captured = await stripe.paymentIntents.capture(paymentIntentId, {}, { idempotencyKey });
+    if (captured.status === 'processing') return 'pending';
+    if (captured.status !== 'succeeded') return 'failed';
+    return confirmCapturedIntent(stripe, service, captured);
   } catch (captureError) {
-    console.error('[lock] capture failed', paymentIntentId, stripeCode(captureError), captureError);
-    return 'failed';
+    console.error('[lock] capture failed', paymentIntentId, idempotencyKey, stripeCode(captureError), captureError);
+    return 'error';
   }
 }
 
@@ -320,108 +379,343 @@ function toMoney(status: string): PlayerMoney {
   return 'other';
 }
 
+async function dropSavedCards(
+  service: SupabaseClient,
+  stripe: Stripe,
+  gameId: string,
+  players: RosterPlayer[],
+  promote: boolean,
+): Promise<void> {
+  for (const player of players) {
+    if (player.payment_status !== 'card_saved') continue;
+    await dropLockPlayer(service, stripe, gameId, player, 'unconfirmed', promote);
+    player.payment_status = 'other';
+  }
+}
+
+/** Drop a player at lock and cancel a PaymentIntent that is still open. */
+async function dropLockPlayer(
+  service: SupabaseClient,
+  stripe: Stripe,
+  gameId: string,
+  player: RosterPlayer,
+  reason: string,
+  promote: boolean,
+): Promise<void> {
+  if (player.stripe_payment_intent_id) {
+    try {
+      const intent = await stripe.paymentIntents.retrieve(player.stripe_payment_intent_id);
+      if (intent.status === 'succeeded') {
+        const result = await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
+        if (result === 'confirmed') {
+          player.payment_status = 'paid';
+          return;
+        }
+      } else if (intent.status !== 'canceled') {
+        await stripe.paymentIntents.cancel(intent.id).catch(() => {});
+      }
+    } catch (cancelError) {
+      console.error('[lock] cancel before drop failed', player.id, cancelError);
+    }
+  }
+  const { error } = await service.rpc('drop_unpaid_player', {
+    p_game_player_id: player.id,
+    p_reason: reason,
+  });
+  if (error) {
+    console.error('[lock] drop unpaid player failed', player.id, error);
+    return;
+  }
+  player.payment_status = 'other';
+  if (!promote) return;
+  const { error: promoteError } = await service.rpc('promote_waitlist_if_going_ahead', { p_game_id: gameId });
+  if (promoteError) console.error('[lock] waitlist promote failed', gameId, promoteError);
+}
+
+async function settleOneGameAtLock(service: SupabaseClient, stripe: Stripe, game: LockGame): Promise<void> {
+  if (game.shortfall_at) return;
+
+  const { data: roster, error: rosterError } = await service
+    .from('game_players')
+    .select('id, user_id, payment_status, stripe_payment_intent_id, game_id')
+    .eq('game_id', game.game_id)
+    .eq('is_waitlisted', false);
+  if (rosterError) throw rosterError;
+  const players = (roster ?? []) as RosterPlayer[];
+  for (const player of players) {
+    if (player.payment_status === 'paid' || !player.stripe_payment_intent_id) continue;
+    const intent = await stripe.paymentIntents.retrieve(player.stripe_payment_intent_id);
+    if (intent.status !== 'succeeded') continue;
+    const result = await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
+    if (result === 'confirmed') player.payment_status = 'paid';
+  }
+
+  const initial = planAtLock({
+    minPlayers: game.min_players,
+    shortfallOpen: false,
+    players: players.map((player) => toMoney(player.payment_status)),
+  });
+
+  // A saved card has no live hold. Every branch that finishes this tick
+  // drops them, so teams are never picked with that spot still open.
+  // While a capture is still processing, leave them: the SQL sweep will
+  // not pick teams until the authorised rows settle.
+  const savedCards = players.filter((player) => player.payment_status === 'card_saved').length;
+  if (initial.type !== 'capture_then_confirm') {
+    await dropSavedCards(service, stripe, game.game_id, players, false);
+    if (initial.type === 'confirm_captured') await promoteWaitlist(service, game.game_id, savedCards);
+    return;
+  }
+
+  const queue = players.filter(
+    (player) => player.payment_status === 'authorized' && player.stripe_payment_intent_id,
+  );
+  let captured = players.filter((player) => player.payment_status === 'paid').length;
+  let processing = 0;
+  const live: RosterPlayer[] = [];
+
+  for (const player of queue) {
+    const intentId = player.stripe_payment_intent_id as string;
+    const kind = await classifyHold(stripe, intentId);
+    if (kind === 'captured') {
+      const result = await captureOne(stripe, service, intentId);
+      if (result === 'captured') captured += 1;
+      else if (result === 'pending') processing += 1;
+    } else if (kind === 'dead') {
+      await dropLockPlayer(service, stripe, game.game_id, player, 'expired', false);
+    } else if (kind === 'processing') {
+      processing += 1;
+    } else {
+      live.push(player);
+    }
+  }
+
+  if (processing > 0) return;
+
+  if (captured + live.length < game.min_players) {
+    await dropSavedCards(service, stripe, game.game_id, players, false);
+    await service.rpc('mark_game_shortfall', { p_game_id: game.game_id });
+    return;
+  }
+
+  let pause = false;
+  for (let index = 0; index < live.length; index += 1) {
+    const player = live[index];
+    const result = await captureOne(stripe, service, player.stripe_payment_intent_id as string);
+    if (result === 'captured') {
+      captured += 1;
+      continue;
+    }
+    if (result === 'pending') {
+      processing += 1;
+      continue;
+    }
+    const stillAuthorized = live.slice(index + 1).length;
+    const next = planAfterCaptureFailure({
+      minPlayers: game.min_players,
+      captured,
+      stillAuthorized,
+    });
+    const goingAhead = next.type !== 'pause';
+    await dropLockPlayer(service, stripe, game.game_id, player, 'declined', goingAhead);
+    if (next.type === 'pause') {
+      pause = true;
+      break;
+    }
+  }
+
+  if (processing > 0) return;
+  if (pause || captured < game.min_players) {
+    await dropSavedCards(service, stripe, game.game_id, players, false);
+    await service.rpc('mark_game_shortfall', { p_game_id: game.game_id });
+    return;
+  }
+  await dropSavedCards(service, stripe, game.game_id, players, false);
+  await promoteWaitlist(service, game.game_id, savedCards);
+}
+
+async function promoteWaitlist(service: SupabaseClient, gameId: string, spots: number): Promise<void> {
+  for (let index = 0; index < spots; index += 1) {
+    const { error } = await service.rpc('promote_waitlist_if_going_ahead', { p_game_id: gameId });
+    if (error) {
+      console.error('[lock] waitlist promote failed', gameId, error);
+      return;
+    }
+  }
+}
+
 /**
  * Before the SQL lock sweep: capture when the minimum is covered by live
  * holds. If a dead hold or a declined capture would drop the game under the
- * minimum, pause and leave every remaining hold uncaptured.
+ * minimum, pause and leave every remaining hold uncaptured. One game failing
+ * does not stop the rest.
  */
 export async function settleLocksBeforeSql(service: SupabaseClient, stripe: Stripe): Promise<void> {
   const { data, error } = await service.rpc('list_games_at_lock');
   if (error) throw error;
 
   for (const game of (data ?? []) as LockGame[]) {
-    if (game.shortfall_at) continue;
-
-    const { data: roster, error: rosterError } = await service
-      .from('game_players')
-      .select('id, user_id, payment_status, stripe_payment_intent_id')
-      .eq('game_id', game.game_id)
-      .eq('is_waitlisted', false);
-    if (rosterError) throw rosterError;
-    const players = (roster ?? []) as RosterPlayer[];
-    for (const player of players) {
-      if (player.payment_status === 'paid' || !player.stripe_payment_intent_id) continue;
-      const intent = await stripe.paymentIntents.retrieve(player.stripe_payment_intent_id);
-      if (intent.status !== 'succeeded') continue;
-      const result = await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
-      if (result === 'confirmed') player.payment_status = 'paid';
-    }
-
-    const initial = planAtLock({
-      minPlayers: game.min_players,
-      shortfallOpen: false,
-      players: players.map((player) => toMoney(player.payment_status)),
-    });
-    if (initial.type === 'confirm_captured') {
-      // Enough players are already charged (typical of 1.0.6 immediate capture).
-      // A saved card that never became a hold should not keep a spot off the teams.
-      for (const player of players) {
-        if (player.payment_status !== 'card_saved') continue;
-        const { error: dropError } = await service.rpc('drop_unpaid_player', {
-          p_game_player_id: player.id,
-          p_reason: 'unconfirmed',
-        });
-        if (dropError) console.error('[lock] drop saved card failed', player.id, dropError);
-      }
-      continue;
-    }
-    if (initial.type !== 'capture_then_confirm') continue;
-
-    const queue = players.filter(
-      (player) => player.payment_status === 'authorized' && player.stripe_payment_intent_id,
-    );
-    let captured = players.filter((player) => player.payment_status === 'paid').length;
-    let processing = 0;
-    const live: RosterPlayer[] = [];
-
-    // Drop dead holds before capturing anyone, so a short game never takes money.
-    // A hold still processing at the bank is left alone until the next sweep.
-    for (const player of queue) {
-      const intentId = player.stripe_payment_intent_id as string;
-      const kind = await classifyHold(stripe, intentId);
-      if (kind === 'captured') {
-        await captureOne(stripe, service, intentId);
-        captured += 1;
-      } else if (kind === 'dead') {
-        await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: 'expired' });
-      } else if (kind === 'processing') {
-        processing += 1;
-      } else {
-        live.push(player);
-      }
-    }
-
-    if (processing > 0) continue;
-
-    if (captured + live.length < game.min_players) {
-      await service.rpc('mark_game_shortfall', { p_game_id: game.game_id });
-      continue;
-    }
-
-    let pause = false;
-    for (let index = 0; index < live.length; index += 1) {
-      const player = live[index];
-      const result = await captureOne(stripe, service, player.stripe_payment_intent_id as string);
-      if (result === 'captured') {
-        captured += 1;
-        continue;
-      }
-      await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: 'declined' });
-      const next = planAfterCaptureFailure({
-        minPlayers: game.min_players,
-        captured,
-        stillAuthorized: live.length - index - 1,
-      });
-      if (next.type === 'pause') {
-        pause = true;
-        break;
-      }
-    }
-
-    if (pause) {
-      await service.rpc('mark_game_shortfall', { p_game_id: game.game_id });
+    try {
+      await settleOneGameAtLock(service, stripe, game);
+    } catch (gameError) {
+      console.error('[lock] settle game at lock failed', game.game_id, gameError);
+      await captureEdgeError('apply-game-lock', gameError);
     }
   }
+}
+
+/**
+ * A short game the organiser never answered is cancelled at kickoff.
+ * The lock SQL does this in the normal run, and writes the cancellation
+ * notice. This is the same rule for tests and for a run where that SQL failed.
+ * The refund sweep then releases holds and refunds captured payments.
+ */
+export async function cancelUndecidedShortGames(service: SupabaseClient): Promise<string[]> {
+  const now = new Date().toISOString();
+  const { data, error } = await service
+    .from('games')
+    .select('id, status, starts_at, shortfall_at, shortfall_confirmed_at, teams_picked_at')
+    .in('status', ['open', 'full'])
+    .not('shortfall_at', 'is', null)
+    .is('shortfall_confirmed_at', null)
+    .is('teams_picked_at', null)
+    .lte('starts_at', now);
+  if (error) throw error;
+  const cancelled: string[] = [];
+  for (const game of (data ?? []) as { id: string; starts_at: string | null; shortfall_at: string | null }[]) {
+    if (!game.shortfall_at || !game.starts_at) continue;
+    if (Date.parse(game.starts_at) > Date.now()) continue;
+    const { error: updateError } = await service
+      .from('games')
+      .update({ status: 'cancelled', cancelled_at: now })
+      .eq('id', game.id)
+      .in('status', ['open', 'full']);
+    if (updateError) {
+      console.error('[lock] could not auto-cancel short game', game.id, updateError);
+      continue;
+    }
+    cancelled.push(game.id);
+  }
+  return cancelled;
+}
+
+/**
+ * A kickoff move releases a hold in the database before Stripe is told.
+ * Cancel those PaymentIntents once no player still points at them.
+ */
+export async function cancelDetachedHolds(service: SupabaseClient, stripe: Stripe): Promise<number> {
+  const { data, error } = await service
+    .from('game_payments')
+    .select('id, stripe_payment_intent_id')
+    .in('status', ['requires_capture', 'requires_payment'])
+    .not('stripe_payment_intent_id', 'is', null);
+  if (error) throw error;
+  let cancelled = 0;
+  for (const row of (data ?? []) as { id: string; stripe_payment_intent_id: string | null }[]) {
+    if (!row.stripe_payment_intent_id) continue;
+    const { data: player, error: playerError } = await service
+      .from('game_players')
+      .select('id')
+      .eq('stripe_payment_intent_id', row.stripe_payment_intent_id)
+      .maybeSingle();
+    if (playerError) throw playerError;
+    if (player) continue;
+    try {
+      const intent = await stripe.paymentIntents.retrieve(row.stripe_payment_intent_id);
+      if (intent.status === 'succeeded' || intent.status === 'processing') continue;
+      if (intent.status !== 'canceled') await stripe.paymentIntents.cancel(intent.id);
+      const { error: markError } = await service
+        .from('game_payments')
+        .update({ status: 'canceled' })
+        .eq('id', row.id);
+      if (markError) throw markError;
+      cancelled += 1;
+    } catch (cancelError) {
+      console.error('[lock] detach hold cancel failed', row.stripe_payment_intent_id, cancelError);
+    }
+  }
+  return cancelled;
+}
+
+/** SetupIntents whose player row has gone. Cancel them and close the ledger row. */
+export async function tidyOrphanedSetupIntents(service: SupabaseClient, stripe: Stripe): Promise<number> {
+  const { data, error } = await service
+    .from('game_payments')
+    .select('id, stripe_setup_intent_id, game_player_id')
+    .in('status', ['requires_payment', 'card_saved'])
+    .is('stripe_payment_intent_id', null)
+    .not('stripe_setup_intent_id', 'is', null);
+  if (error) throw error;
+  let tidied = 0;
+  for (const row of (data ?? []) as { id: string; stripe_setup_intent_id: string | null; game_player_id: string | null }[]) {
+    if (!row.stripe_setup_intent_id) continue;
+    if (row.game_player_id) {
+      const { data: player, error: playerError } = await service
+        .from('game_players')
+        .select('id')
+        .eq('id', row.game_player_id)
+        .maybeSingle();
+      if (playerError) throw playerError;
+      if (player) continue;
+    }
+    try {
+      const setup = await stripe.setupIntents.retrieve(row.stripe_setup_intent_id);
+      if (setup.status !== 'succeeded' && setup.status !== 'canceled') {
+        await stripe.setupIntents.cancel(row.stripe_setup_intent_id);
+      }
+    } catch (setupError) {
+      console.error('[lock] setup intent tidy failed', row.stripe_setup_intent_id, setupError);
+    }
+    const { error: markError } = await service
+      .from('game_payments')
+      .update({ status: 'expired' })
+      .eq('id', row.id);
+    if (!markError) tidied += 1;
+  }
+  return tidied;
+}
+
+type PushRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  body: string | null;
+  data: Record<string, unknown> | null;
+  pushed_at: string | null;
+};
+
+/**
+ * Stamp pushed_at while it is still null and return only the rows this run
+ * claimed. A second cron tick in the same 15 minutes gets nothing.
+ */
+export async function claimLockNotificationPushes(
+  service: SupabaseClient,
+  gameIds: string[],
+  nowMs = Date.now(),
+): Promise<PushRow[]> {
+  const since = new Date(nowMs - 15 * 60 * 1000).toISOString();
+  const { data, error } = await service
+    .from('notifications')
+    .select('id, user_id, title, body, data, pushed_at')
+    .gte('created_at', since)
+    .is('pushed_at', null);
+  if (error) throw error;
+  const claimed: PushRow[] = [];
+  const stampedAt = new Date(nowMs).toISOString();
+  for (const row of (data ?? []) as PushRow[]) {
+    const type = typeof row.data?.type === 'string' ? row.data.type : null;
+    const gameId = typeof row.data?.gameId === 'string' ? row.data.gameId : null;
+    if (!lockNotificationShouldPush({ type, pushedAt: row.pushed_at, gameId, gameIds })) continue;
+    const { data: updated, error: stampError } = await service
+      .from('notifications')
+      .update({ pushed_at: stampedAt })
+      .eq('id', row.id)
+      .is('pushed_at', null)
+      .select('id');
+    if (stampError) throw stampError;
+    if (Array.isArray(updated) && updated.length > 0) claimed.push(row);
+  }
+  return claimed;
 }
 
 export async function cancelUncapturedPayments(
@@ -912,7 +1206,7 @@ export async function releaseOutstandingCancelledGame(
     released += await refundSucceededPayments(service, stripe, gameId, options);
   } catch (listError) {
     console.error('[lock] succeeded refund list failed', gameId, listError);
-    await captureEdgeError('apply-game-lock', listError);
+    await captureEdgeError(options?.source ?? 'apply-game-lock', listError);
     failures += 1;
   }
 
@@ -965,7 +1259,7 @@ export async function releaseOutstandingCancelledGame(
       failures += 1;
       await markRefundAttemptFailed(service, row, Date.now(), options?.source ?? 'apply-game-lock');
       console.error('[lock] cancelled game payment release failed', row.stripe_payment_intent_id, paymentError);
-      await captureEdgeError('apply-game-lock', paymentError);
+      await captureEdgeError(options?.source ?? 'apply-game-lock', paymentError);
     }
   }
   return { released, failures };
@@ -1004,18 +1298,22 @@ async function alertOpenRefunds(
   service: SupabaseClient,
   gameId: string,
   reason: 'window_elapsed' | 'sweep_failure_limit',
-): Promise<void> {
+): Promise<boolean> {
+  const statuses = reason === 'window_elapsed'
+    ? ['succeeded']
+    : ['succeeded', 'requires_capture', 'requires_payment'];
   const { data, error } = await service
     .from('game_payments')
     .select('id, game_id, status, pitch_cents, amount_cents, refund_abandoned_at')
     .eq('game_id', gameId)
-    .in('status', ['succeeded', 'requires_capture', 'requires_payment'])
+    .in('status', statuses)
     .is('refund_abandoned_at', null);
   if (error) {
     console.error('[lock] could not list unrefunded rows', gameId, error);
-    return;
+    return false;
   }
   const now = new Date().toISOString();
+  let stamped = true;
   for (const row of (data ?? []) as {
     id: string;
     game_id: string | null;
@@ -1028,8 +1326,12 @@ async function alertOpenRefunds(
       .from('game_payments')
       .update({ refund_abandoned_at: now })
       .eq('id', row.id);
-    if (stampError) console.error('[lock] could not stamp abandoned refund', row.id, stampError);
+    if (stampError) {
+      console.error('[lock] could not stamp abandoned refund', row.id, stampError);
+      stamped = false;
+    }
   }
+  return stamped;
 }
 
 /** Games that aged out of the sweep still owe money. Say so once. */
@@ -1046,7 +1348,8 @@ async function alertGamesPastRefundWindow(service: SupabaseClient): Promise<void
   const now = new Date().toISOString();
   for (const game of (data ?? []) as { id: string; starts_at: string | null }[]) {
     if (!game.starts_at) continue;
-    await alertOpenRefunds(service, game.id, 'window_elapsed');
+    const listed = await alertOpenRefunds(service, game.id, 'window_elapsed');
+    if (!listed) continue;
     const { error: stampError } = await service
       .from('games')
       .update({ refund_window_alerted_at: now })

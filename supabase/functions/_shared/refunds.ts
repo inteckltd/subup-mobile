@@ -190,7 +190,10 @@ export async function markRefundAttemptFailed(
       ...(gaveUp ? { refund_abandoned_at: new Date(nowMs).toISOString() } : {}),
     })
     .eq('id', row.id);
-  if (error) console.error('[refund] could not record refund backoff', row.id, error);
+  if (error) {
+    console.error('[refund] could not record refund backoff', row.id, error);
+    return;
+  }
   if (gaveUp && !row.refund_abandoned_at) {
     await alertRefundAbandoned(source, row, 'failure_limit');
   }
@@ -290,7 +293,7 @@ export async function refundSucceededPayments(
       }
       await markRefundAttemptFailed(service, row, Date.now(), options?.source ?? 'apply-game-lock');
       console.error('[refund] payment refund failed', row.stripe_payment_intent_id, refundError);
-      await captureEdgeError('refund-game-payments', refundError);
+      await captureEdgeError(options?.source ?? 'apply-game-lock', refundError);
     }
   }
   return refunded;

@@ -201,7 +201,7 @@ export async function payToJoinGame(gameId: string): Promise<{ error?: string }>
   const sheet = {
     merchantDisplayName: 'SubUp',
     returnURL: 'subup://stripe-redirect',
-    googlePay: { merchantCountryCode: 'GB' as const, testEnv: true as const, currencyCode: 'GBP' as const },
+    googlePay: { merchantCountryCode: 'GB' as const, testEnv: googlePayUsesTestEnv(), currencyCode: 'GBP' as const },
     applePay: { merchantCountryCode: 'GB' as const },
   };
   const init = await (data.mode === 'setup'
@@ -219,6 +219,20 @@ export async function payToJoinGame(gameId: string): Promise<{ error?: string }>
     return { error: presented.error.message || 'Payment failed.' };
   }
 
-  await supabase.functions.invoke('sync-join-payment', { body: { gameId } });
+  const synced = await supabase.functions.invoke('sync-join-payment', { body: { gameId } });
+  if (synced.error || synced.data?.ok === false) {
+    return { error: synced.data?.error ?? "Couldn't keep your spot. You are not in this game." };
+  }
+  if (synced.data?.status === 'refunded') {
+    return { error: 'That spot had gone, so the payment was refunded. You are not in this game.' };
+  }
+  if (synced.data?.status === 'unavailable') {
+    return { error: 'That spot is no longer available. You are not in this game.' };
+  }
   return {};
+}
+
+/** A test publishable key uses Google Pay's test environment. Live and missing keys do not. */
+function googlePayUsesTestEnv(): boolean {
+  return (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '').startsWith('pk_test_');
 }
