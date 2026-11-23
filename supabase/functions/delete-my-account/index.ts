@@ -7,7 +7,7 @@
 //    rows SET NULL and show as "Deleted user".
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import { releaseUserUpcomingPayments } from '../_shared/lock-runner.ts';
+import { deleteSavedStripeCustomer, releaseUserUpcomingPayments } from '../_shared/lock-runner.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { getStripe } from '../_shared/stripe.ts';
 
@@ -122,6 +122,14 @@ Deno.serve(async (req) => {
       console.error('[delete-my-account] could not release payments', stripeError);
       await captureEdgeError('delete-my-account', stripeError);
       return jsonResponse({ ok: false, error: "Couldn't refund your upcoming games. Please try again." }, 500);
+    }
+    try {
+      // The stripe_customers row is removed when the profile cascades. Read
+      // it and delete the Customer first, once nothing open still needs it.
+      await deleteSavedStripeCustomer(serviceClient, getStripe(), userId);
+    } catch (customerError) {
+      console.error('[delete-my-account] could not delete stripe customer', customerError);
+      await captureEdgeError('delete-my-account', customerError);
     }
   }
 

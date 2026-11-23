@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { authorizeJoin, cancelDetachedHolds, cancelUndecidedShortGames, claimLockNotificationPushes, confirmPaidJoin, noteJoinPaymentFailed, placeDueOffSessionHolds, releaseOutstandingCancelledGame, settleLocksBeforeSql, sweepCancelledGameRefunds, tidyOrphanedSetupIntents } from './lock-runner.ts';
+import { authorizeJoin, cancelDetachedHolds, cancelUndecidedShortGames, claimLockNotificationPushes, confirmPaidJoin, deleteSavedStripeCustomer, noteJoinPaymentFailed, placeDueOffSessionHolds, releaseOutstandingCancelledGame, settleLocksBeforeSql, sweepCancelledGameRefunds, tidyOrphanedSetupIntents } from './lock-runner.ts';
 import { REFUND_ABANDONED_TITLE } from './payment-hotfix.ts';
 import { refundPaymentIntent } from './refunds.ts';
 
@@ -41,6 +41,7 @@ type Database = {
   game_players: Row[];
   notifications: Row[];
   dueHolds: Row[];
+  stripe_customers: Row[];
 };
 
 function project(row: Row, select: string | null): Row {
@@ -307,7 +308,7 @@ function ledgerRpc(db: Database) {
 }
 
 function emptyDb(): Database {
-  return { games: [], game_payments: [], game_players: [], notifications: [], dueHolds: [] };
+  return { games: [], game_payments: [], game_players: [], notifications: [], dueHolds: [], stripe_customers: [] };
 }
 
 function holdIntent(id: string) {
@@ -1166,4 +1167,56 @@ test('a SetupIntent with no player left is cancelled and the ledger row expires'
   assert.deepEqual(cancels, ['seti_orphan']);
   assert.equal(db.game_payments.find((row) => row.id === 'orphan')?.status, 'expired');
   assert.equal(db.game_payments.find((row) => row.id === 'live')?.status, 'card_saved');
+});
+
+test('deleting an account removes the Stripe customer only when nothing is still open', async () => {
+  async function run(setup: (db: ReturnType<typeof emptyDb>) => void, del: () => Promise<unknown> | unknown) {
+    const db = emptyDb();
+    db.stripe_customers.push({ user_id: 'u1', stripe_customer_id: 'cus_1' });
+    setup(db);
+    const deleted: string[] = [];
+    const stripe = {
+      customers: {
+        del: async (id: string) => {
+          deleted.push(id);
+          return del();
+        },
+      },
+    };
+    const lines = await captureErrors(async () => {
+      const result = await deleteSavedStripeCustomer(serviceFor(db, ledgerRpc(db)) as never, stripe as never, 'u1');
+      linesHolder.result = result;
+    });
+    return { deleted, lines, result: linesHolder.result };
+  }
+  const linesHolder: { result?: string } = {};
+
+  const cleared = await run(() => {}, async () => ({ id: 'cus_1', deleted: true }));
+  assert.equal(cleared.result, 'deleted');
+  assert.deepEqual(cleared.deleted, ['cus_1']);
+  assert.equal(cleared.lines.some((line) => line.includes('stripe_customer_not_deleted')), false);
+
+  const missing = await run(() => {}, async () => {
+    throw { code: 'resource_missing' };
+  });
+  assert.equal(missing.result, 'already_gone');
+  assert.deepEqual(missing.deleted, ['cus_1']);
+  assert.equal(missing.lines.some((line) => line.includes('stripe_customer_not_deleted')), false);
+
+  const openHold = await run((db) => {
+    db.game_players.push({
+      id: 'gp-hold', user_id: 'u1', payment_status: 'authorized', stripe_payment_intent_id: 'pi_open',
+    });
+  }, async () => ({ id: 'cus_1', deleted: true }));
+  assert.equal(openHold.result, 'left_open');
+  assert.deepEqual(openHold.deleted, []);
+  assert.equal(openHold.lines.filter((line) => line.includes('stripe_customer_not_deleted')).length, 1);
+  assert.match(openHold.lines.join('\n'), /pi_open/);
+  assert.equal(openHold.lines.join('\n').includes('@'), false);
+
+  const stripeDown = await run(() => {}, async () => {
+    throw { code: 'api_connection_error' };
+  });
+  assert.equal(stripeDown.result, 'failed');
+  assert.equal(stripeDown.lines.filter((line) => line.includes('stripe_customer_not_deleted')).length, 1);
 });

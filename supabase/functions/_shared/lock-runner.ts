@@ -35,7 +35,7 @@ import {
   refundSucceededPayments,
   type RefundReleaseOptions,
 } from './refunds.ts';
-import { captureEdgeError } from './sentry.ts';
+import { captureEdgeAlert, captureEdgeError } from './sentry.ts';
 
 type DueHold = {
   game_player_id: string;
@@ -946,6 +946,87 @@ export async function releaseUserUpcomingPayments(
     }
     await refundCapturedOrCancel(stripe, service, payment.stripe_payment_intent_id, payment.pitch_cents);
   }
+}
+
+/**
+ * Delete the platform Customer, which also detaches saved cards.
+ * Skip it when a hold, an uncaptured PaymentIntent, or a SetupIntent is
+ * still open. A missing Customer is already gone. Any other Stripe error
+ * is reported and does not stop account deletion.
+ */
+export async function deleteSavedStripeCustomer(
+  service: SupabaseClient,
+  stripe: Stripe,
+  userId: string,
+): Promise<'deleted' | 'already_gone' | 'left_open' | 'failed'> {
+  const { data, error } = await service
+    .from('stripe_customers')
+    .select('stripe_customer_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  const customerId = (data as { stripe_customer_id?: string | null } | null)?.stripe_customer_id ?? null;
+  if (!customerId) return 'already_gone';
+
+  const openIds = await openStripeCustomerUses(service, userId);
+  if (openIds.length > 0) {
+    await alertStripeCustomerKept(userId, customerId, openIds);
+    return 'left_open';
+  }
+
+  try {
+    await stripe.customers.del(customerId);
+    return 'deleted';
+  } catch (deleteError) {
+    if (stripeCode(deleteError) === 'resource_missing') return 'already_gone';
+    await alertStripeCustomerKept(userId, customerId, [stripeCode(deleteError) || 'stripe_error']);
+    return 'failed';
+  }
+}
+
+async function openStripeCustomerUses(service: SupabaseClient, userId: string): Promise<string[]> {
+  const ids: string[] = [];
+  const { data: holds, error: holdError } = await service
+    .from('game_players')
+    .select('id, stripe_payment_intent_id')
+    .eq('user_id', userId)
+    .eq('payment_status', 'authorized');
+  if (holdError) throw holdError;
+  for (const row of (holds ?? []) as { id: string; stripe_payment_intent_id: string | null }[]) {
+    ids.push(row.stripe_payment_intent_id ?? row.id);
+  }
+
+  const { data: uncaptured, error: uncapturedError } = await service
+    .from('game_payments')
+    .select('id, stripe_payment_intent_id')
+    .eq('user_id', userId)
+    .eq('status', 'requires_capture');
+  if (uncapturedError) throw uncapturedError;
+  for (const row of (uncaptured ?? []) as { id: string; stripe_payment_intent_id: string | null }[]) {
+    ids.push(row.stripe_payment_intent_id ?? row.id);
+  }
+
+  const { data: setups, error: setupError } = await service
+    .from('game_payments')
+    .select('id, stripe_setup_intent_id')
+    .eq('user_id', userId)
+    .in('status', ['requires_payment', 'card_saved'])
+    .not('stripe_setup_intent_id', 'is', null);
+  if (setupError) throw setupError;
+  for (const row of (setups ?? []) as { id: string; stripe_setup_intent_id: string | null }[]) {
+    if (row.stripe_setup_intent_id) ids.push(row.stripe_setup_intent_id);
+  }
+  return ids;
+}
+
+async function alertStripeCustomerKept(userId: string, customerId: string, openIds: string[]): Promise<void> {
+  await captureEdgeAlert({
+    source: 'delete-my-account',
+    title: 'Stripe customer not deleted',
+    level: 'error',
+    tags: { alert: 'stripe_customer_not_deleted' },
+    extra: { userId, customerId, openIds },
+  });
 }
 
 async function paymentRowId(service: SupabaseClient, paymentIntentId: string): Promise<string> {
