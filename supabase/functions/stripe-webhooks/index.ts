@@ -3,6 +3,7 @@
 import Stripe from 'npm:stripe@17.7.0';
 
 import { authorizeJoin, confirmPaidJoin, noteJoinPaymentFailed } from '../_shared/lock-runner.ts';
+import { connectedAccountEventSkipsJoinHeal } from '../_shared/payment-hotfix.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import { accountTransfersEnabled, getStripe } from '../_shared/stripe.ts';
@@ -48,6 +49,9 @@ Deno.serve(async (req) => {
   try {
     switch (event.type) {
       case 'payment_intent.succeeded': {
+        // A Connect event's PaymentIntent is not on the platform account.
+        // Retrieving it there 500s the webhook. account.updated still runs.
+        if (connectedAccountEventSkipsJoinHeal(event.account)) break;
         // Immediate-capture (1.0.6) and a later hold capture both land here.
         // A refunded row stays refunded: the PaymentIntent status is still succeeded.
         const intent = event.data.object as Stripe.PaymentIntent;
@@ -55,6 +59,7 @@ Deno.serve(async (req) => {
         break;
       }
       case 'payment_intent.amount_capturable_updated': {
+        if (connectedAccountEventSkipsJoinHeal(event.account)) break;
         const intent = event.data.object as Stripe.PaymentIntent;
         // Automatic capture never authorises a hold. Ignore it so a 1.0.6
         // charge cannot be stored as payment_status 'authorized'.

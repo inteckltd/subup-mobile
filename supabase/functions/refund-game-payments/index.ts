@@ -6,7 +6,7 @@
 // releaseOutstandingCancelledGame directly with the service role, on the
 // same cron secret as the rest of the lock sweep.
 
-import { authorizeRefundGamePayments } from '../_shared/payment-hotfix.ts';
+import { authorizeRefundGamePayments, cancelledGameNeedsRefundSweep } from '../_shared/payment-hotfix.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { releaseOutstandingCancelledGame } from '../_shared/lock-runner.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
@@ -63,9 +63,12 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: decision.error }, decision.httpStatus);
     }
 
-    const started = game?.starts_at ? new Date(game.starts_at).getTime() <= Date.now() : false;
-    if (game?.treasurer_payout_id || started) {
-      return jsonResponse({ ok: true, refunded: 0, skipped: 'started' });
+    if (!game || !cancelledGameNeedsRefundSweep({
+      status: game.status,
+      startsAt: game.starts_at,
+      treasurerPayoutId: game.treasurer_payout_id,
+    }, Date.now())) {
+      return jsonResponse({ ok: true, refunded: 0, skipped: 'outside_window' });
     }
 
     const stripe = getStripe();

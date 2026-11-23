@@ -8,17 +8,28 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { dispositionForStripeIntent, paymentIntentChargeId, shouldReleasePaymentOnAccountDeletion } from './join-payment-flow.ts';
 import { planAfterCaptureFailure, planAtLock, type PlayerMoney } from './lock-decision.ts';
 import {
+  CANCELLED_REFUND_WINDOW_MS,
   cancelledGameNeedsRefundSweep,
   chargeIsFullyRefunded,
   classifyIntentForExpiry,
   ledgerStatusAfterPaymentFailure,
+  nextRefundSweepBackoff,
   orphanHealAction,
-  paymentFailureReleasesSpot,
+  paymentIntentIsSubUpJoin,
   paymentNeedsCancelledGameRelease,
+  refundSweepShouldAttempt,
+  type JoinIntentMetadata,
   type RestoreResult,
 } from './payment-hotfix.ts';
+import {
+  clearRefundAttempt,
+  isIdempotentRefundError,
+  markRefundAttemptFailed,
+  refundAttemptIsDue,
+  refundPaymentIntent,
+  refundSucceededPayments,
+} from './refunds.ts';
 import { captureEdgeError } from './sentry.ts';
-import { isIdempotentRefundError, refundPaymentIntent, refundSucceededPayments } from './stripe.ts';
 
 type DueHold = {
   game_player_id: string;
@@ -143,16 +154,17 @@ export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: S
   for (const row of (data ?? []) as DueHold[]) {
     if (!row.stripe_customer_id || !row.stripe_payment_method_id || !row.stripe_account_id) continue;
     try {
-      const intent = await stripe.paymentIntents.create(
+      // Attach the ledger row before the PaymentIntent can become
+      // requires_capture. Confirming in the create call lets
+      // amount_capturable_updated win the race and cancel a hold that has
+      // no ledger row yet.
+      const created = await stripe.paymentIntents.create(
         {
           amount: row.total_cents,
           currency: 'gbp',
           capture_method: 'manual',
           customer: row.stripe_customer_id,
           payment_method: row.stripe_payment_method_id,
-          confirm: true,
-          off_session: true,
-          error_on_requires_action: true,
           application_fee_amount: row.fee_cents,
           transfer_data: { destination: row.stripe_account_id },
           metadata: {
@@ -161,18 +173,38 @@ export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: S
             game_player_id: row.game_player_id,
           },
         },
-        { idempotencyKey: `hold:${row.game_player_id}` },
+        { idempotencyKey: `hold:${row.game_player_id}:attached` },
       );
+      const { error: attachError } = await service.rpc('attach_payment_intent', {
+        p_game_player_id: row.game_player_id,
+        p_payment_intent_id: created.id,
+        p_amount_cents: row.total_cents,
+        p_application_fee_cents: row.fee_cents,
+        p_pitch_cents: row.pitch_cents,
+      });
+      if (attachError) {
+        if (created.status !== 'succeeded') {
+          await stripe.paymentIntents.cancel(created.id).catch(() => {});
+        }
+        throw attachError;
+      }
+      const intent = created.status === 'requires_capture' || created.status === 'succeeded'
+        ? created
+        : await stripe.paymentIntents.confirm(
+          created.id,
+          {
+            payment_method: row.stripe_payment_method_id,
+            off_session: true,
+            error_on_requires_action: true,
+          },
+          { idempotencyKey: `hold-confirm:${row.game_player_id}` },
+        );
       if (intent.status === 'requires_capture') {
-        const { error: attachError } = await service.rpc('attach_payment_intent', {
-          p_game_player_id: row.game_player_id,
-          p_payment_intent_id: intent.id,
-          p_amount_cents: row.total_cents,
-          p_application_fee_cents: row.fee_cents,
-          p_pitch_cents: row.pitch_cents,
-        });
-        if (attachError) throw attachError;
         await markAuthorized(service, stripe, intent);
+        continue;
+      }
+      if (intent.status === 'succeeded') {
+        await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
         continue;
       }
       await stripe.paymentIntents.cancel(intent.id).catch(() => {});
@@ -586,9 +618,6 @@ export async function noteJoinPaymentFailed(
   const next = ledgerStatusAfterPaymentFailure((data as { status?: string } | null)?.status ?? null);
   if (!next) return;
   // The player row stays. PaymentSheet is still open and a second card can succeed.
-  if (paymentFailureReleasesSpot()) {
-    throw new Error('payment_intent.payment_failed must not release the reserved spot');
-  }
   const { error: updateError } = await service
     .from('game_payments')
     .update({ status: next })
@@ -605,6 +634,52 @@ function chargeSnapshot(intent: Stripe.PaymentIntent): { refunded?: boolean; amo
     amount: latest.amount,
     amount_refunded: latest.amount_refunded,
   };
+}
+
+type LinkedJoin = { gameId: string | null; userId: string | null; gamePlayerId: string | null };
+
+async function linkedJoinRow(
+  service: SupabaseClient,
+  intent: { id: string; metadata?: JoinIntentMetadata | null },
+): Promise<LinkedJoin | null> {
+  const { data: pay, error } = await service
+    .from('game_payments')
+    .select('game_id, user_id, game_player_id')
+    .eq('stripe_payment_intent_id', intent.id)
+    .maybeSingle();
+  if (error) throw error;
+  if (pay) {
+    const row = pay as { game_id: string | null; user_id: string | null; game_player_id: string | null };
+    return { gameId: row.game_id, userId: row.user_id, gamePlayerId: row.game_player_id };
+  }
+
+  const playerId = intent.metadata?.game_player_id?.trim() ?? '';
+  const userId = intent.metadata?.user_id?.trim() ?? '';
+  const gameId = intent.metadata?.game_id?.trim() ?? '';
+  if (playerId) {
+    const { data: player, error: playerError } = await service
+      .from('game_players')
+      .select('id, game_id, user_id')
+      .eq('id', playerId)
+      .maybeSingle();
+    if (playerError) throw playerError;
+    if (!player) return null;
+    const row = player as { id: string; game_id: string | null; user_id: string | null };
+    return { gameId: row.game_id, userId: row.user_id, gamePlayerId: row.id };
+  }
+  if (gameId && userId) {
+    const { data: player, error: playerError } = await service
+      .from('game_players')
+      .select('id, game_id, user_id')
+      .eq('game_id', gameId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (playerError) throw playerError;
+    if (!player) return null;
+    const row = player as { id: string; game_id: string | null; user_id: string | null };
+    return { gameId: row.game_id, userId: row.user_id, gamePlayerId: row.id };
+  }
+  return null;
 }
 
 /**
@@ -650,8 +725,20 @@ async function healMissingPlayer(
   });
   if (error) throw error;
   const restoreResult = (typeof data === 'string' ? data : 'unavailable') as RestoreResult;
-  const action = orphanHealAction({ kind, restoreResult });
-  if (action === 'keep') return restoreResult;
+  const subUpJoin = restoreResult === 'missing_payment'
+    ? paymentIntentIsSubUpJoin(intent.metadata, await linkedJoinRow(service, intent))
+    : true;
+  const action = orphanHealAction({ kind, restoreResult, subUpJoin });
+  if (action === 'keep') {
+    if (restoreResult === 'missing_payment') {
+      console.error('[lock] leaving PaymentIntent alone; not a matching SubUp join', paymentIntentId);
+      await captureEdgeError(
+        'apply-game-lock',
+        new Error(`Not healing PaymentIntent ${paymentIntentId}: metadata is not a matching SubUp join`),
+      );
+    }
+    return restoreResult;
+  }
 
   if (action === 'refund_full') {
     try {
@@ -765,17 +852,21 @@ export async function releaseOutstandingCancelledGame(
 
   const { data, error } = await service
     .from('game_payments')
-    .select('stripe_payment_intent_id, pitch_cents, status')
+    .select('id, stripe_payment_intent_id, pitch_cents, status, refund_failure_count, refund_backoff_until')
     .eq('game_id', gameId)
     .in('status', ['requires_capture', 'requires_payment']);
   if (error) throw error;
 
   for (const row of (data ?? []) as {
+    id: string;
     stripe_payment_intent_id: string | null;
     pitch_cents: number | null;
     status: string;
+    refund_failure_count: number | null;
+    refund_backoff_until: string | null;
   }[]) {
     if (!row.stripe_payment_intent_id || !paymentNeedsCancelledGameRelease(row.status)) continue;
+    if (!refundAttemptIsDue(row)) continue;
     try {
       const result = await refundCapturedOrCancel(
         stripe,
@@ -789,17 +880,21 @@ export async function releaseOutstandingCancelledGame(
         });
         if (noteError) throw noteError;
       }
+      await clearRefundAttempt(service, row);
       released += 1;
     } catch (paymentError) {
       if (isIdempotentRefundError(paymentError)) {
         const { error: markError } = await service.rpc('mark_game_payment_refunded', {
           p_payment_intent_id: row.stripe_payment_intent_id,
         });
-        if (!markError) released += 1;
-        else failures += 1;
+        if (!markError) {
+          await clearRefundAttempt(service, row);
+          released += 1;
+        } else failures += 1;
         continue;
       }
       failures += 1;
+      await markRefundAttemptFailed(service, row);
       console.error('[lock] cancelled game payment release failed', row.stripe_payment_intent_id, paymentError);
       await captureEdgeError('apply-game-lock', paymentError);
     }
@@ -807,37 +902,70 @@ export async function releaseOutstandingCancelledGame(
   return { released, failures };
 }
 
+type SweepGame = {
+  id: string;
+  status: string;
+  starts_at: string | null;
+  treasurer_payout_id: string | null;
+  refund_sweep_failure_count: number | null;
+  refund_sweep_backoff_until: string | null;
+};
+
+async function markGameSweepFailed(service: SupabaseClient, game: SweepGame): Promise<void> {
+  const next = nextRefundSweepBackoff(game.refund_sweep_failure_count ?? 0, Date.now());
+  const { error } = await service
+    .from('games')
+    .update({
+      refund_sweep_failure_count: next.failureCount,
+      refund_sweep_backoff_until: next.backoffUntil,
+    })
+    .eq('id', game.id);
+  if (error) console.error('[lock] could not record refund sweep backoff', game.id, error);
+}
+
+async function clearGameSweepFailed(service: SupabaseClient, game: SweepGame): Promise<void> {
+  if (!(game.refund_sweep_failure_count ?? 0) && !game.refund_sweep_backoff_until) return;
+  const { error } = await service
+    .from('games')
+    .update({ refund_sweep_failure_count: 0, refund_sweep_backoff_until: null })
+    .eq('id', game.id);
+  if (error) console.error('[lock] could not clear refund sweep backoff', game.id, error);
+}
+
 /**
  * Cancelled games the last run did not finish refunding. Each game is its
- * own try/catch. Games that have started, or whose treasurer was paid, are
- * left alone.
+ * own try/catch. The treasurer payout path skips cancelled games, so this
+ * keeps going after kickoff until about 30 days after starts_at. A game
+ * that keeps failing backs off, then stops, instead of calling Stripe and
+ * Sentry on every cron run.
  */
 export async function sweepCancelledGameRefunds(
   service: SupabaseClient,
   stripe: Stripe,
 ): Promise<{ games: number; released: number; failures: number }> {
-  const nowIso = new Date().toISOString();
+  const earliest = new Date(Date.now() - CANCELLED_REFUND_WINDOW_MS).toISOString();
   const { data, error } = await service
     .from('games')
-    .select('id, status, starts_at, treasurer_payout_id')
+    .select('id, status, starts_at, treasurer_payout_id, refund_sweep_failure_count, refund_sweep_backoff_until')
     .eq('status', 'cancelled')
     .is('treasurer_payout_id', null)
-    .gt('starts_at', nowIso);
+    .or(`starts_at.gte.${earliest},starts_at.is.null`);
   if (error) throw error;
 
   let games = 0;
   let released = 0;
   let failures = 0;
-  for (const game of (data ?? []) as {
-    id: string;
-    status: string;
-    starts_at: string | null;
-    treasurer_payout_id: string | null;
-  }[]) {
+  for (const game of (data ?? []) as SweepGame[]) {
     if (!cancelledGameNeedsRefundSweep({
       status: game.status,
       startsAt: game.starts_at,
       treasurerPayoutId: game.treasurer_payout_id,
+    }, Date.now())) {
+      continue;
+    }
+    if (!refundSweepShouldAttempt({
+      failureCount: game.refund_sweep_failure_count ?? 0,
+      backoffUntil: game.refund_sweep_backoff_until ?? null,
     }, Date.now())) {
       continue;
     }
@@ -846,8 +974,10 @@ export async function sweepCancelledGameRefunds(
       const result = await releaseOutstandingCancelledGame(service, stripe, game.id);
       released += result.released;
       failures += result.failures;
+      await clearGameSweepFailed(service, game);
     } catch (gameError) {
       failures += 1;
+      await markGameSweepFailed(service, game);
       console.error('[lock] cancelled game refund sweep failed', game.id, gameError);
       await captureEdgeError('apply-game-lock', gameError);
     }

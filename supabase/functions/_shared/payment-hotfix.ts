@@ -1,8 +1,8 @@
 // Pure decisions for the payment hotfix. No Stripe or Supabase imports,
 // so node:test can load this file.
 //
-// restore_orphaned_join (migration 041) enforces canRestoreOrphanedJoin
-// under a row lock. Keep the two copies the same.
+// Who can be seated again lives only in restore_orphaned_join (migration
+// 041). This file does not keep a second copy of that rule.
 
 export type RefundAuth =
   | { ok: true }
@@ -35,11 +35,8 @@ export function authorizeRefundGamePayments(input: {
 /**
  * payment_intent.payment_failed. The PaymentSheet stays open and the
  * PaymentIntent goes back to requires_payment_method, so a second card
- * can still succeed. Never drop the player row here.
+ * can still succeed. The player row stays. Expiry drops it if they leave.
  */
-export function paymentFailureReleasesSpot(): boolean {
-  return false;
-}
 
 /** Record the decline only while the ledger is still an unpaid checkout. */
 export function ledgerStatusAfterPaymentFailure(current: string | null): 'failed' | null {
@@ -68,30 +65,6 @@ export function classifyIntentForExpiry(
   return 'abandon';
 }
 
-export type OrphanGameSnapshot = {
-  status: string;
-  startsAt: string | null;
-  teamsPicked: boolean;
-  treasurerPayoutId: string | null;
-  heldSpots: number;
-  maxPlayers: number;
-  /** Another non-refunded player row for this user (any payment). */
-  userHasOtherSpot: boolean;
-};
-
-/** The game can still take this player, and nobody else is holding their place. */
-export function canRestoreOrphanedJoin(game: OrphanGameSnapshot, nowMs: number): boolean {
-  if (game.userHasOtherSpot) return false;
-  if (game.status !== 'open' && game.status !== 'full') return false;
-  if (game.teamsPicked) return false;
-  if (game.treasurerPayoutId) return false;
-  if (!game.startsAt) return false;
-  const startsAt = Date.parse(game.startsAt);
-  if (!Number.isFinite(startsAt) || startsAt <= nowMs) return false;
-  if (game.maxPlayers <= 0 || game.heldSpots >= game.maxPlayers) return false;
-  return true;
-}
-
 export type RestoreResult =
   | 'restored'
   | 'already_live'
@@ -102,14 +75,45 @@ export type RestoreResult =
 
 export type OrphanHealAction = 'keep' | 'refund_full' | 'cancel_hold';
 
+export type JoinIntentMetadata = {
+  game_id?: string | null;
+  user_id?: string | null;
+  game_player_id?: string | null;
+};
+
+/**
+ * A platform PaymentIntent is one of ours only when its metadata carries a
+ * game id and a player or user id, and those ids match a row we actually
+ * have. Anything else is left alone: healing it would refund or cancel a
+ * charge that is not a SubUp join.
+ */
+export function paymentIntentIsSubUpJoin(
+  metadata: JoinIntentMetadata | null | undefined,
+  linked: { gameId?: string | null; userId?: string | null; gamePlayerId?: string | null } | null,
+): boolean {
+  const gameId = metadata?.game_id?.trim() ?? '';
+  const userId = metadata?.user_id?.trim() ?? '';
+  const playerId = metadata?.game_player_id?.trim() ?? '';
+  if (!gameId || (!userId && !playerId)) return false;
+  if (!linked?.gameId || linked.gameId !== gameId) return false;
+  if (userId && linked.userId !== userId) return false;
+  if (playerId && linked.gamePlayerId !== playerId) return false;
+  if (playerId && linked.gamePlayerId === playerId) return true;
+  return userId.length > 0 && linked.userId === userId;
+}
+
 /**
  * No live player row after a capture or an authorisation.
  * Restoring keeps the money. Otherwise the player got nothing: refund the
  * whole charge (pitch and fee) or cancel the hold.
+ * missing_payment with no matching SubUp metadata is not healed. That
+ * PaymentIntent may belong to something else on the platform account, or
+ * the ledger row may not be attached yet.
  */
 export function orphanHealAction(input: {
   kind: 'captured' | 'hold';
   restoreResult: RestoreResult;
+  subUpJoin: boolean;
 }): OrphanHealAction {
   if (
     input.restoreResult === 'restored' ||
@@ -119,6 +123,7 @@ export function orphanHealAction(input: {
   ) {
     return 'keep';
   }
+  if (input.restoreResult === 'missing_payment' && !input.subUpJoin) return 'keep';
   return input.kind === 'captured' ? 'refund_full' : 'cancel_hold';
 }
 
@@ -138,10 +143,17 @@ export function paymentNeedsCancelledGameRelease(status: string): boolean {
   return (CANCELLED_GAME_RELEASE_STATUSES as readonly string[]).includes(status);
 }
 
+/** Keep sweeping a cancelled game until about 30 days after kickoff. */
+export const CANCELLED_REFUND_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Stop calling Stripe after this many consecutive refund failures. */
+export const REFUND_SWEEP_MAX_FAILURES = 5;
+
 /**
- * Cancelled, not kicked off, and the treasurer has not been paid out.
- * Started games and games already paid out are left alone, same as the
- * manual refund function.
+ * Cancelled, treasurer not paid out, and kickoff is inside the refund
+ * window. Payouts skip cancelled games, so money still on the card after
+ * kickoff has to be refunded here. The window closes about 30 days after
+ * starts_at. A cancelled game with no kickoff time is still included.
  */
 export function cancelledGameNeedsRefundSweep(
   game: { status: string; startsAt: string | null; treasurerPayoutId: string | null },
@@ -149,9 +161,64 @@ export function cancelledGameNeedsRefundSweep(
 ): boolean {
   if (game.status !== 'cancelled') return false;
   if (game.treasurerPayoutId) return false;
-  if (!game.startsAt) return false;
+  if (!game.startsAt) return true;
   const startsAt = Date.parse(game.startsAt);
-  return Number.isFinite(startsAt) && startsAt > nowMs;
+  if (!Number.isFinite(startsAt)) return false;
+  return nowMs <= startsAt + CANCELLED_REFUND_WINDOW_MS;
+}
+
+/**
+ * A succeeded ledger row whose player is gone was charged and never seated.
+ * The sweep must return the pitch and the fee. A live player on a cancelled
+ * game gets the pitch back and SubUp keeps the fee.
+ */
+export function succeededRefundScope(hasLivePlayer: boolean): 'pitch' | 'full' {
+  return hasLivePlayer ? 'pitch' : 'full';
+}
+
+export function refundSweepShouldAttempt(
+  input: { failureCount: number; backoffUntil: string | null },
+  nowMs: number,
+): boolean {
+  if (input.failureCount >= REFUND_SWEEP_MAX_FAILURES) return false;
+  if (!input.backoffUntil) return true;
+  const until = Date.parse(input.backoffUntil);
+  if (!Number.isFinite(until)) return true;
+  return until <= nowMs;
+}
+
+/** Delay before the next try. null means stop calling Stripe. */
+export function refundSweepBackoffMs(failureCountAfterThisAttempt: number): number | null {
+  if (failureCountAfterThisAttempt >= REFUND_SWEEP_MAX_FAILURES) return null;
+  const steps = [
+    15 * 60 * 1000,
+    60 * 60 * 1000,
+    4 * 60 * 60 * 1000,
+    12 * 60 * 60 * 1000,
+  ];
+  const index = Math.max(0, failureCountAfterThisAttempt - 1);
+  return steps[Math.min(index, steps.length - 1)];
+}
+
+export function nextRefundSweepBackoff(
+  failureCount: number,
+  nowMs: number,
+): { failureCount: number; backoffUntil: string | null } {
+  const next = failureCount + 1;
+  const delay = refundSweepBackoffMs(next);
+  return {
+    failureCount: next,
+    backoffUntil: delay == null ? null : new Date(nowMs + delay).toISOString(),
+  };
+}
+
+/**
+ * Connect webhooks set event.account. Those PaymentIntents live on the
+ * connected account. Retrieving them with the platform key returns an error
+ * and the webhook responds 500, so Stripe retries forever.
+ */
+export function connectedAccountEventSkipsJoinHeal(account: string | null | undefined): boolean {
+  return typeof account === 'string' && account.length > 0;
 }
 
 /**
@@ -166,4 +233,14 @@ export function refundIdempotencyKey(paymentRowId: string, scope: 'pitch' | 'ful
   if (!id) throw new Error('refund idempotency key needs a payment row id');
   if (scope === 'full') return `refund-${id}-full`;
   return `refund-${id}`;
+}
+
+/**
+ * One reversal per ledger row. A retry after the reversal succeeded and the
+ * refund failed must not reverse the transfer a second time.
+ */
+export function reversalIdempotencyKey(paymentRowId: string): string {
+  const id = paymentRowId.trim();
+  if (!id) throw new Error('reversal idempotency key needs a payment row id');
+  return `reversal-${id}`;
 }

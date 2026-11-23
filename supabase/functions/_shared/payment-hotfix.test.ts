@@ -3,33 +3,24 @@ import { test } from 'node:test';
 
 import {
   authorizeRefundGamePayments,
-  canRestoreOrphanedJoin,
   cancelledGameNeedsRefundSweep,
   chargeIsFullyRefunded,
   classifyIntentForExpiry,
+  connectedAccountEventSkipsJoinHeal,
   ledgerStatusAfterPaymentFailure,
   orphanHealAction,
-  paymentFailureReleasesSpot,
+  paymentIntentIsSubUpJoin,
   paymentNeedsCancelledGameRelease,
+  REFUND_SWEEP_MAX_FAILURES,
   refundIdempotencyKey,
-  type OrphanGameSnapshot,
+  refundSweepShouldAttempt,
+  reversalIdempotencyKey,
+  succeededRefundScope,
 } from './payment-hotfix.ts';
 
 const now = Date.parse('2026-11-23T12:00:00Z');
 const future = '2026-12-01T18:00:00Z';
-
-function openGame(overrides: Partial<OrphanGameSnapshot> = {}): OrphanGameSnapshot {
-  return {
-    status: 'open',
-    startsAt: future,
-    teamsPicked: false,
-    treasurerPayoutId: null,
-    heldSpots: 4,
-    maxPlayers: 10,
-    userHasOtherSpot: false,
-    ...overrides,
-  };
-}
+const day = 24 * 60 * 60 * 1000;
 
 test('refund-game-payments allows only a group admin of a cancelled game', () => {
   assert.deepEqual(
@@ -66,8 +57,7 @@ test('refund-game-payments allows only a group admin of a cancelled game', () =>
   );
 });
 
-test('a declined card keeps the spot so the next card can succeed', () => {
-  assert.equal(paymentFailureReleasesSpot(), false);
+test('a decline is recorded only while the checkout is still unpaid', () => {
   assert.equal(ledgerStatusAfterPaymentFailure('requires_payment'), 'failed');
   // A later success must be allowed to move the ledger. Do not clobber a
   // capture, a hold, or a refund that won the race.
@@ -76,39 +66,37 @@ test('a declined card keeps the spot so the next card can succeed', () => {
   assert.equal(ledgerStatusAfterPaymentFailure('refunded'), null);
   assert.equal(ledgerStatusAfterPaymentFailure('failed'), null);
   assert.equal(ledgerStatusAfterPaymentFailure(null), null);
-  // The reservation is still there, so success is not an orphan heal.
-  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'already_live' }), 'keep');
-  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'already_live' }), 'keep');
+  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'already_live', subUpJoin: true }), 'keep');
+  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'already_live', subUpJoin: true }), 'keep');
 });
 
-test('a captured orphan is seated when the game can take them, otherwise refunded in full', () => {
-  assert.equal(canRestoreOrphanedJoin(openGame(), now), true);
-  assert.equal(canRestoreOrphanedJoin(openGame({ status: 'full', heldSpots: 9, maxPlayers: 10 }), now), true);
-  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'restored' }), 'keep');
-  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'unavailable' }), 'refund_full');
-  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'missing_payment' }), 'refund_full');
-  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'refunded' }), 'keep');
+test('a captured orphan is refunded in full when the game cannot take them', () => {
+  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'restored', subUpJoin: true }), 'keep');
+  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'unavailable', subUpJoin: true }), 'refund_full');
+  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'missing_payment', subUpJoin: true }), 'refund_full');
+  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'missing_payment', subUpJoin: false }), 'keep');
+  assert.equal(orphanHealAction({ kind: 'captured', restoreResult: 'refunded', subUpJoin: true }), 'keep');
 });
 
 test('an authorised hold is cancelled, not refunded, when the spot cannot be restored', () => {
-  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'unavailable' }), 'cancel_hold');
-  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'missing_payment' }), 'cancel_hold');
-  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'restored' }), 'keep');
-  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'unwound' }), 'keep');
-  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'refunded' }), 'keep');
+  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'unavailable', subUpJoin: true }), 'cancel_hold');
+  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'missing_payment', subUpJoin: true }), 'cancel_hold');
+  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'missing_payment', subUpJoin: false }), 'keep');
+  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'restored', subUpJoin: true }), 'keep');
+  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'unwound', subUpJoin: true }), 'keep');
+  assert.equal(orphanHealAction({ kind: 'hold', restoreResult: 'refunded', subUpJoin: false }), 'keep');
 });
 
-test('an orphan is not seated when the game is closed, full, started, or already taken', () => {
-  assert.equal(canRestoreOrphanedJoin(openGame({ status: 'cancelled' }), now), false);
-  assert.equal(canRestoreOrphanedJoin(openGame({ status: 'completed' }), now), false);
-  assert.equal(canRestoreOrphanedJoin(openGame({ status: 'draft' }), now), false);
-  assert.equal(canRestoreOrphanedJoin(openGame({ teamsPicked: true }), now), false);
-  assert.equal(canRestoreOrphanedJoin(openGame({ treasurerPayoutId: 'po_1' }), now), false);
-  assert.equal(canRestoreOrphanedJoin(openGame({ startsAt: '2026-11-01T18:00:00Z' }), now), false);
-  assert.equal(canRestoreOrphanedJoin(openGame({ startsAt: null }), now), false);
-  assert.equal(canRestoreOrphanedJoin(openGame({ heldSpots: 10, maxPlayers: 10 }), now), false);
-  assert.equal(canRestoreOrphanedJoin(openGame({ userHasOtherSpot: true }), now), false);
-  assert.equal(canRestoreOrphanedJoin(openGame({ maxPlayers: 0 }), now), false);
+test('a PaymentIntent is a SubUp join only when metadata matches a real row', () => {
+  const linked = { gameId: 'g1', userId: 'u1', gamePlayerId: 'gp1' };
+  assert.equal(paymentIntentIsSubUpJoin({ game_id: 'g1', user_id: 'u1', game_player_id: 'gp1' }, linked), true);
+  assert.equal(paymentIntentIsSubUpJoin({ game_id: 'g1', user_id: 'u1' }, linked), true);
+  assert.equal(paymentIntentIsSubUpJoin({ game_id: 'g1', game_player_id: 'gp1' }, linked), true);
+  assert.equal(paymentIntentIsSubUpJoin({}, linked), false);
+  assert.equal(paymentIntentIsSubUpJoin({ game_id: 'g1' }, linked), false);
+  assert.equal(paymentIntentIsSubUpJoin({ game_id: 'g1', user_id: 'u1', game_player_id: 'gp1' }, null), false);
+  assert.equal(paymentIntentIsSubUpJoin({ game_id: 'other', user_id: 'u1', game_player_id: 'gp1' }, linked), false);
+  assert.equal(paymentIntentIsSubUpJoin({ game_id: 'g1', user_id: 'other', game_player_id: 'gp1' }, linked), false);
 });
 
 test('a charge that is already refunded is not restored on the next attempt', () => {
@@ -132,7 +120,7 @@ test('expiry does not abandon a PaymentIntent that has succeeded or is still in 
   assert.equal(classifyIntentForExpiry('canceled', 'manual'), 'abandon');
 });
 
-test('the cancel sweep only releases money still sitting on a future cancelled game', () => {
+test('the cancel sweep keeps going after kickoff, then stops about 30 days later', () => {
   assert.equal(
     cancelledGameNeedsRefundSweep(
       { status: 'cancelled', startsAt: future, treasurerPayoutId: null },
@@ -150,7 +138,21 @@ test('the cancel sweep only releases money still sitting on a future cancelled g
   );
   assert.equal(
     cancelledGameNeedsRefundSweep(
-      { status: 'cancelled', startsAt: '2026-11-01T18:00:00Z', treasurerPayoutId: null },
+      { status: 'cancelled', startsAt: new Date(now - day).toISOString(), treasurerPayoutId: null },
+      now,
+    ),
+    true,
+  );
+  assert.equal(
+    cancelledGameNeedsRefundSweep(
+      { status: 'cancelled', startsAt: new Date(now - 29 * day).toISOString(), treasurerPayoutId: null },
+      now,
+    ),
+    true,
+  );
+  assert.equal(
+    cancelledGameNeedsRefundSweep(
+      { status: 'cancelled', startsAt: new Date(now - 31 * day).toISOString(), treasurerPayoutId: null },
       now,
     ),
     false,
@@ -164,8 +166,10 @@ test('the cancel sweep only releases money still sitting on a future cancelled g
   );
   assert.equal(
     cancelledGameNeedsRefundSweep({ status: 'cancelled', startsAt: null, treasurerPayoutId: null }, now),
-    false,
+    true,
   );
+  assert.equal(succeededRefundScope(true), 'pitch');
+  assert.equal(succeededRefundScope(false), 'full');
   assert.equal(paymentNeedsCancelledGameRelease('succeeded'), true);
   assert.equal(paymentNeedsCancelledGameRelease('requires_capture'), true);
   assert.equal(paymentNeedsCancelledGameRelease('requires_payment'), true);
@@ -188,4 +192,28 @@ test('refund idempotency keys are stable per payment row', () => {
   assert.notEqual(refundIdempotencyKey(id), refundIdempotencyKey('8c2f1a3b-2d4e-5f60-9b0c-1d2e3f4a5b6c'));
   assert.throws(() => refundIdempotencyKey('   '));
   assert.throws(() => refundIdempotencyKey(''));
+  assert.equal(reversalIdempotencyKey(id), `reversal-${id}`);
+  assert.equal(reversalIdempotencyKey(`  ${id}  `), `reversal-${id}`);
+  assert.notEqual(reversalIdempotencyKey(id), refundIdempotencyKey(id));
+  assert.throws(() => reversalIdempotencyKey(''));
+});
+
+test('the refund sweep backs off and then stops', () => {
+  assert.equal(refundSweepShouldAttempt({ failureCount: 0, backoffUntil: null }, now), true);
+  assert.equal(
+    refundSweepShouldAttempt({ failureCount: 1, backoffUntil: new Date(now + day).toISOString() }, now),
+    false,
+  );
+  assert.equal(
+    refundSweepShouldAttempt({ failureCount: 1, backoffUntil: new Date(now - day).toISOString() }, now),
+    true,
+  );
+  assert.equal(
+    refundSweepShouldAttempt({ failureCount: REFUND_SWEEP_MAX_FAILURES, backoffUntil: null }, now),
+    false,
+  );
+  assert.equal(connectedAccountEventSkipsJoinHeal('acct_123'), true);
+  assert.equal(connectedAccountEventSkipsJoinHeal(undefined), false);
+  assert.equal(connectedAccountEventSkipsJoinHeal(''), false);
+  assert.equal(connectedAccountEventSkipsJoinHeal(null), false);
 });

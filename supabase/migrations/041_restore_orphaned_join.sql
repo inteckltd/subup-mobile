@@ -1,10 +1,11 @@
 -- Recreate a paid or authorised spot when the player row was deleted before
 -- Stripe confirmed the money (a declined-card webhook, or checkout expiry).
+-- Also advances a ledger row that a decline or an expiry left on failed or
+-- expired, once the same PaymentIntent actually succeeds.
 -- Service role only. Called by the payment Edge Functions.
 --
--- Idempotent: create or replace, no new enum values, no RLS changes, no
--- backfill. Join rules match canRestoreOrphanedJoin in
--- supabase/functions/_shared/payment-hotfix.ts:
+-- Idempotent: create or replace, additive columns, no new enum values, no
+-- RLS changes, no backfill. Who can be seated:
 --   * game is open or full
 --   * kickoff is still in the future
 --   * teams are not picked and the treasurer has not been paid out
@@ -195,3 +196,185 @@ comment on function public.restore_orphaned_join(text, text, text) is
 
 revoke all on function public.restore_orphaned_join(text, text, text) from public, anon, authenticated;
 grant execute on function public.restore_orphaned_join(text, text, text) to service_role;
+
+-- Consecutive refund failures. The sweep stops calling Stripe after a few.
+-- game_payments is service-role only. The games columns are written by the
+-- sweep; the app does not read or send them.
+
+alter table public.game_payments
+  add column if not exists refund_failure_count integer not null default 0,
+  add column if not exists refund_backoff_until timestamptz;
+
+alter table public.games
+  add column if not exists refund_sweep_failure_count integer not null default 0,
+  add column if not exists refund_sweep_backoff_until timestamptz;
+
+comment on column public.game_payments.refund_failure_count is
+  'Consecutive refund or cancel failures for this ledger row. The sweep stops calling Stripe at 5.';
+comment on column public.game_payments.refund_backoff_until is
+  'Do not retry this ledger row before this time.';
+comment on column public.games.refund_sweep_failure_count is
+  'Consecutive cancelled-game sweep failures for this game. The sweep stops at 5.';
+comment on column public.games.refund_sweep_backoff_until is
+  'Do not run the cancelled-game refund sweep for this game before this time.';
+
+-- A decline writes game_payments.status = failed and leaves the player pending.
+-- The next card on that PaymentIntent is a real hold or a real capture, so
+-- the ledger has to move. expired is included because expiry can stamp it
+-- before a late success webhook. refunded and succeeded are not moved
+-- backwards. card_saved does not downgrade a hold or a capture.
+
+create or replace function public.mark_join_authorized(
+  p_payment_intent_id text,
+  p_payment_method_id text default null,
+  p_capture_before timestamptz default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_player public.game_players;
+begin
+  update public.game_payments
+  set status = 'requires_capture',
+      stripe_payment_method_id = coalesce(p_payment_method_id, stripe_payment_method_id),
+      capture_before = coalesce(p_capture_before, capture_before)
+  where stripe_payment_intent_id = p_payment_intent_id
+    and status in ('requires_payment', 'requires_capture', 'card_saved', 'failed', 'expired');
+
+  select * into v_player
+  from public.game_players
+  where stripe_payment_intent_id = p_payment_intent_id;
+
+  if v_player.id is null then
+    select gp.* into v_player
+    from public.game_payments pay
+    join public.game_players gp on gp.id = pay.game_player_id
+    where pay.stripe_payment_intent_id = p_payment_intent_id;
+  end if;
+
+  if v_player.id is null or v_player.payment_status = 'paid' then
+    return v_player.game_id;
+  end if;
+
+  update public.game_players
+  set payment_status = 'authorized',
+      pending_expires_at = null,
+      is_waitlisted = false,
+      stripe_payment_intent_id = p_payment_intent_id,
+      stripe_payment_method_id = coalesce(p_payment_method_id, stripe_payment_method_id)
+  where id = v_player.id
+    and payment_status in ('pending', 'card_saved', 'authorized');
+
+  return v_player.game_id;
+end;
+$$;
+
+revoke all on function public.mark_join_authorized(text, text, timestamptz) from public, anon, authenticated;
+grant execute on function public.mark_join_authorized(text, text, timestamptz) to service_role;
+
+create or replace function public.confirm_paid_join(p_payment_intent_id text, p_charge_id text default null)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_player public.game_players;
+begin
+  update public.game_payments
+  set status = 'succeeded',
+      stripe_charge_id = coalesce(p_charge_id, stripe_charge_id)
+  where stripe_payment_intent_id = p_payment_intent_id
+    and status in (
+      'requires_payment', 'requires_capture', 'card_saved',
+      'failed', 'expired', 'canceled'
+    );
+
+  select * into v_player
+  from public.game_players
+  where stripe_payment_intent_id = p_payment_intent_id;
+
+  if v_player.id is null then
+    select gp.* into v_player
+    from public.game_payments pay
+    join public.game_players gp on gp.id = pay.game_player_id
+    where pay.stripe_payment_intent_id = p_payment_intent_id;
+  end if;
+
+  if v_player.id is null then
+    return null;
+  end if;
+
+  update public.game_players
+  set payment_status = 'paid',
+      pending_expires_at = null,
+      is_waitlisted = false
+  where id = v_player.id;
+
+  return v_player.game_id;
+end;
+$$;
+
+revoke all on function public.confirm_paid_join(text, text) from public, anon, authenticated;
+grant execute on function public.confirm_paid_join(text, text) to service_role;
+
+create or replace function public.mark_join_card_saved(
+  p_game_player_id uuid,
+  p_setup_intent_id text,
+  p_payment_method_id text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_player public.game_players;
+begin
+  select * into v_player from public.game_players where id = p_game_player_id;
+  if v_player.id is null or v_player.payment_status in ('paid', 'authorized') then
+    return v_player.game_id;
+  end if;
+
+  update public.game_players
+  set payment_status = 'card_saved',
+      pending_expires_at = null,
+      is_waitlisted = false,
+      stripe_setup_intent_id = coalesce(p_setup_intent_id, stripe_setup_intent_id),
+      stripe_payment_method_id = coalesce(p_payment_method_id, stripe_payment_method_id)
+  where id = v_player.id
+    and payment_status in ('pending', 'card_saved');
+
+  update public.game_payments
+  set status = 'card_saved',
+      stripe_payment_method_id = coalesce(p_payment_method_id, stripe_payment_method_id)
+  where game_player_id = v_player.id
+    and stripe_setup_intent_id = p_setup_intent_id
+    and status in ('requires_payment', 'card_saved', 'failed', 'expired');
+
+  return v_player.game_id;
+end;
+$$;
+
+revoke all on function public.mark_join_card_saved(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.mark_join_card_saved(uuid, text, text) to service_role;
+
+-- After apply, service_role must be the only caller. anon and authenticated
+-- should be false:
+--
+-- select p.proname,
+--        has_function_privilege('service_role', p.oid, 'execute') as service_role,
+--        has_function_privilege('anon', p.oid, 'execute') as anon,
+--        has_function_privilege('authenticated', p.oid, 'execute') as authenticated
+-- from pg_proc p
+-- join pg_namespace n on n.oid = p.pronamespace
+-- where n.nspname = 'public'
+--   and p.proname in (
+--     'restore_orphaned_join',
+--     'mark_join_authorized',
+--     'confirm_paid_join',
+--     'mark_join_card_saved'
+--   );
