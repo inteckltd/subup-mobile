@@ -11,12 +11,16 @@
 import { timingSafeEqual } from '../_shared/crypto.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import {
+  cancelDetachedHolds,
+  cancelUndecidedShortGames,
+  claimLockNotificationPushes,
   placeDueOffSessionHolds,
   releaseExpiredPayment,
   releaseOutstandingCancelledGame,
   settleLocksBeforeSql,
   settlePendingJoinsBeforeExpiry,
   sweepCancelledGameRefunds,
+  tidyOrphanedSetupIntents,
 } from '../_shared/lock-runner.ts';
 import { getStripe, payoutDueTreasurerGames } from '../_shared/stripe.ts';
 import { createServiceClient, withJwtSkewRetry } from '../_shared/supabase.ts';
@@ -126,12 +130,32 @@ Deno.serve(async (req) => {
   }
 
   if (stripe) {
+    // Each step has its own catch. A database error while cancelling a
+    // detached hold, or these functions going out before migration 046,
+    // must not skip the capture that decides the game.
+    try {
+      await tidyOrphanedSetupIntents(serviceClient, stripe);
+    } catch (tidyError) {
+      console.error('[apply-game-lock] setup intent tidy failed', tidyError);
+      await captureEdgeError('apply-game-lock', tidyError);
+    }
+    try {
+      await cancelDetachedHolds(serviceClient, stripe);
+    } catch (detachError) {
+      console.error('[apply-game-lock] detach hold sweep failed', detachError);
+      await captureEdgeError('apply-game-lock', detachError);
+    }
     try {
       await placeDueOffSessionHolds(serviceClient, stripe);
-      await settleLocksBeforeSql(serviceClient, stripe);
     } catch (holdError) {
-      console.error('[apply-game-lock] hold/capture sweep failed', holdError);
+      console.error('[apply-game-lock] off-session hold sweep failed', holdError);
       await captureEdgeError('apply-game-lock', holdError);
+    }
+    try {
+      await settleLocksBeforeSql(serviceClient, stripe);
+    } catch (settleError) {
+      console.error('[apply-game-lock] lock capture sweep failed', settleError);
+      await captureEdgeError('apply-game-lock', settleError);
     }
   }
 
@@ -153,6 +177,15 @@ Deno.serve(async (req) => {
   if (lockError) {
     console.error('[apply-game-lock] apply_game_lock_window failed', lockError);
     await captureEdgeError('apply-game-lock', lockError);
+    // The SQL sweep normally cancels an undecided short game at kickoff and
+    // writes the cancellation notice. If that sweep failed, cancel here so
+    // the refund pass below still has a cancelled game to release.
+    try {
+      await cancelUndecidedShortGames(serviceClient);
+    } catch (shortError) {
+      console.error('[apply-game-lock] short-game auto-cancel failed', shortError);
+      await captureEdgeError('apply-game-lock', shortError);
+    }
     if (stripe) {
       try {
         await sweepCancelledGameRefunds(serviceClient, stripe);
@@ -191,24 +224,19 @@ Deno.serve(async (req) => {
     }
   }
 
-  const { data: notifications, error: notificationsError } = await serviceClient
-    .from('notifications')
-    .select('user_id, title, body, data')
-    .in('type', ['game_cancelled', 'game_updated', 'game_shortfall', 'payment'])
-    .gte('created_at', new Date(Date.now() - 15 * 60 * 1000).toISOString());
-
-  if (notificationsError) {
+  let rows: NotificationRow[] = [];
+  try {
+    rows = (await claimLockNotificationPushes(serviceClient, gameIds)).map((row) => ({
+      user_id: row.user_id,
+      title: row.title,
+      body: row.body,
+      data: row.data ?? {},
+    }));
+  } catch (notificationsError) {
     console.error('[apply-game-lock] notifications lookup failed', notificationsError);
     await captureEdgeError('apply-game-lock', notificationsError);
     return jsonResponse({ ok: true, gamesProcessed: gameIds.length, notified: 0, pushed: 0 });
   }
-
-  const rows = ((notifications ?? []) as NotificationRow[]).filter((row) => {
-    const type = row.data?.type;
-    const gameId = String(row.data?.gameId ?? '');
-    if (type === 'game_shortfall' || type === 'card_confirm' || type === 'card_declined') return true;
-    return (type === 'game_cancelled' || type === 'team_assigned') && gameIds.includes(gameId);
-  });
   if (rows.length === 0) {
     return jsonResponse({ ok: true, gamesProcessed: gameIds.length, notified: 0, pushed: 0 });
   }

@@ -14,8 +14,12 @@ import {
   REFUND_SWEEP_MAX_FAILURES,
   refundIdempotencyKey,
   chargeRefundCovers,
+  joiningClosedAtLock,
+  laterLockReleasesHolds,
+  lockNotificationShouldPush,
   offSessionHoldIsDead,
   offSessionHoldIsLive,
+  shortfallAutoCancelsAtKickoff,
   refundSweepBackoffMs,
   refundSweepShouldAttempt,
   reversalIdempotencyKey,
@@ -231,6 +235,7 @@ test('the refund sweep backs off and then stops', () => {
   assert.equal(chargeRefundCovers(999, 1000), false);
   assert.equal(chargeRefundCovers(null, 1000), false);
   assert.equal(offSessionHoldIsDead('requires_payment_method'), true);
+  assert.equal(offSessionHoldIsDead('requires_confirmation'), true);
   assert.equal(offSessionHoldIsDead('canceled'), true);
   assert.equal(offSessionHoldIsDead('requires_capture'), false);
   assert.equal(offSessionHoldIsDead('processing'), false);
@@ -243,4 +248,22 @@ test('the refund sweep backs off and then stops', () => {
   assert.equal(connectedAccountEventSkipsJoinHeal(undefined), false);
   assert.equal(connectedAccountEventSkipsJoinHeal(''), false);
   assert.equal(connectedAccountEventSkipsJoinHeal(null), false);
+  assert.equal(laterLockReleasesHolds(1_000, 2_000), true);
+  assert.equal(laterLockReleasesHolds(2_000, 2_000), false);
+  assert.equal(laterLockReleasesHolds(2_000, 1_000), false);
+  assert.equal(joiningClosedAtLock({ startsAtMs: 10 * 60 * 60 * 1000, lockHours: 2, nowMs: 8 * 60 * 60 * 1000 }), true);
+  assert.equal(joiningClosedAtLock({ startsAtMs: 10 * 60 * 60 * 1000, lockHours: 2, nowMs: 8 * 60 * 60 * 1000 - 1 }), false);
+  assert.equal(joiningClosedAtLock({ startsAtMs: 10 * 60 * 60 * 1000, lockHours: 0, nowMs: 10 * 60 * 60 * 1000 }), false);
+  assert.equal(shortfallAutoCancelsAtKickoff({ startsAtMs: 1_000, shortfallOpen: true, nowMs: 1_000 }), true);
+  assert.equal(shortfallAutoCancelsAtKickoff({ startsAtMs: 1_000, shortfallOpen: true, nowMs: 999 }), false);
+  assert.equal(shortfallAutoCancelsAtKickoff({ startsAtMs: 1_000, shortfallOpen: false, nowMs: 2_000 }), false);
+  assert.equal(lockNotificationShouldPush({ type: 'card_declined', pushedAt: null, gameId: 'g1', gameIds: [] }), true);
+  assert.equal(lockNotificationShouldPush({ type: 'spot_refunded', pushedAt: null, gameId: 'g1', gameIds: [] }), true);
+  assert.equal(lockNotificationShouldPush({ type: 'duplicate_refunded', pushedAt: null, gameId: 'g1', gameIds: [] }), true);
+  assert.equal(lockNotificationShouldPush({ type: 'spot_refunded', pushedAt: 'stamped', gameId: 'g1', gameIds: [] }), false);
+  assert.equal(lockNotificationShouldPush({ type: 'card_declined', pushedAt: 'stamped', gameId: 'g1', gameIds: [] }), false);
+  assert.equal(lockNotificationShouldPush({ type: 'game_cancelled', pushedAt: null, gameId: 'g1', gameIds: ['g2'] }), false);
+  assert.equal(lockNotificationShouldPush({ type: 'game_cancelled', pushedAt: null, gameId: 'g1', gameIds: ['g1'] }), true);
+  assert.equal(lockNotificationShouldPush({ type: 'waitlist_promoted', pushedAt: null, gameId: 'g1', gameIds: [], source: 'lock' }), true);
+  assert.equal(lockNotificationShouldPush({ type: 'waitlist_promoted', pushedAt: null, gameId: 'g1', gameIds: ['g1'] }), false);
 });

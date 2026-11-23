@@ -184,6 +184,14 @@ export async function startConnectOnboarding(): Promise<{ url?: string; error?: 
   return { url: data.url as string };
 }
 
+const STILL_CHECKING = "We're still checking your payment. Open the game in a moment to see if you're in.";
+
+function syncFailureStatus(error: unknown): number | null {
+  if (!error || typeof error !== 'object' || !('context' in error)) return null;
+  const context = (error as { context?: { status?: number } }).context;
+  return typeof context?.status === 'number' ? context.status : null;
+}
+
 export async function payToJoinGame(gameId: string): Promise<{ error?: string }> {
   const { data, error } = await supabase.functions.invoke('create-join-payment', { body: joinPaymentRequest(gameId) });
   if (error || data?.ok === false) {
@@ -201,7 +209,7 @@ export async function payToJoinGame(gameId: string): Promise<{ error?: string }>
   const sheet = {
     merchantDisplayName: 'SubUp',
     returnURL: 'subup://stripe-redirect',
-    googlePay: { merchantCountryCode: 'GB' as const, testEnv: true as const, currencyCode: 'GBP' as const },
+    googlePay: { merchantCountryCode: 'GB' as const, testEnv: googlePayUsesTestEnv(), currencyCode: 'GBP' as const },
     applePay: { merchantCountryCode: 'GB' as const },
   };
   const init = await (data.mode === 'setup'
@@ -219,6 +227,29 @@ export async function payToJoinGame(gameId: string): Promise<{ error?: string }>
     return { error: presented.error.message || 'Payment failed.' };
   }
 
-  await supabase.functions.invoke('sync-join-payment', { body: { gameId } });
+  const synced = await supabase.functions.invoke('sync-join-payment', { body: { gameId } });
+  if (synced.error) {
+    const status = syncFailureStatus(synced.error);
+    // 4xx is a real answer, including 400 "You have not joined this game".
+    // 5xx and a dropped connection are still in flight.
+    if (status != null && status >= 400 && status < 500) {
+      return { error: await invokeFunctionError(synced.data, synced.error, "Couldn't keep your spot. You are not in this game.") };
+    }
+    return { error: STILL_CHECKING };
+  }
+  if (synced.data?.ok === false) {
+    return { error: synced.data?.error ?? "Couldn't keep your spot. You are not in this game." };
+  }
+  if (synced.data?.status === 'refunded') {
+    return { error: 'That spot had gone, so the payment was refunded. You are not in this game.' };
+  }
+  if (synced.data?.status === 'unavailable') {
+    return { error: 'That spot is no longer available. You are not in this game.' };
+  }
   return {};
+}
+
+/** A test publishable key uses Google Pay's test environment. Live and missing keys do not. */
+function googlePayUsesTestEnv(): boolean {
+  return (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '').startsWith('pk_test_');
 }

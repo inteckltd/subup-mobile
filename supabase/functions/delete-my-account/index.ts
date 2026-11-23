@@ -1,14 +1,21 @@
 // SubUp — delete-my-account Edge Function.
 //
 // 1. Verify the caller's JWT.
-// 2. Run delete_my_account() (memberships, sole-member groups, upcoming spots).
-// 3. Remove avatars / group-covers they uploaded.
-// 4. auth.admin.deleteUser so they cannot log in. Remaining game_players
-//    rows SET NULL and show as "Deleted user".
+// 2. Refuse, before any refund, if they are the last admin or still receive
+//    payouts for a group that has other members. HTTP 200 so the live 1.0.6
+//    app shows the message (a 400 is hidden behind a generic sentence).
+// 3. Release upcoming payments, then run delete_my_account().
+// 4. Ask Stripe whether the Customer can go only after that, so the cron
+//    cannot place a new hold in between.
+// 5. Remove uploaded files, then delete the auth user. A missing user is
+//    already gone.
+// 6. Only then delete the Stripe Customer. The stripe_customers row is left
+//    for the profile cascade. Deleting it early would make customers.create
+//    return the deleted Customer for 24 hours.
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import { releaseUserUpcomingPayments } from '../_shared/lock-runner.ts';
-import { captureEdgeError } from '../_shared/sentry.ts';
+import { deleteSavedStripeCustomer, prepareStripeCustomerDeletion, releaseUserUpcomingPayments } from '../_shared/lock-runner.ts';
+import { captureEdgeAlert, captureEdgeError } from '../_shared/sentry.ts';
 import { getStripe } from '../_shared/stripe.ts';
 
 const corsHeaders = {
@@ -53,6 +60,63 @@ async function lastAdminBlockMessage(service: SupabaseClient, userId: string): P
   if (blocked.length === 0) return null;
   blocked.sort((a, b) => a.localeCompare(b));
   return `Promote another admin in ${blocked.join(', ')} before deleting your account.`;
+}
+
+/** Same guard as delete_my_account. A group with nobody else is not blocked. */
+async function payoutPersonBlockMessage(service: SupabaseClient, userId: string): Promise<string | null> {
+  const { data: groups, error } = await service
+    .from('groups')
+    .select('id, name')
+    .eq('payout_user_id', userId);
+  if (error) throw error;
+  const rows = (groups ?? []) as { id: string; name: string | null }[];
+  if (rows.length === 0) return null;
+
+  const { data: members, error: membersError } = await service
+    .from('group_members')
+    .select('group_id, user_id, role')
+    .in('group_id', rows.map((row) => row.id));
+  if (membersError) throw membersError;
+
+  const sentences: string[] = [];
+  const people = (members ?? []) as { group_id: string; user_id: string; role: string | null }[];
+  const named = rows
+    .map((group) => ({ ...group, label: group.name?.trim() || 'a group' }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  for (const group of named) {
+    const inGroup = people.filter((member) => member.group_id === group.id);
+    const others = inGroup.filter((member) => member.user_id !== userId);
+    if (others.length === 0) continue;
+    const me = inGroup.find((member) => member.user_id === userId);
+    const otherAdmins = others.filter((member) => member.role === 'admin').length;
+    if (!me || me.role !== 'admin') {
+      sentences.push(`Ask an admin of ${group.label} to move payouts to someone else.`);
+    } else if (otherAdmins === 0) {
+      sentences.push(`Make another member an admin in ${group.label}, then move payouts to them.`);
+    } else {
+      sentences.push(`Move payouts to another admin in ${group.label}.`);
+    }
+  }
+  if (sentences.length === 0) return null;
+  return `You receive this group's payments. ${sentences.join(' ')} Do that before deleting your account.`;
+}
+
+function authUserAlreadyGone(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const status = 'status' in error ? Number((error as { status: unknown }).status) : Number.NaN;
+  const message = 'message' in error ? String((error as { message: unknown }).message) : '';
+  return status === 404 || /user not found/i.test(message);
+}
+
+function shownRefusal(message: string): string | null {
+  if (
+    message.startsWith('Promote another admin')
+    || message.startsWith("You receive this group's payments")
+    || message.startsWith('You receive payments for')
+  ) {
+    return message;
+  }
+  return null;
 }
 
 async function emptyFolder(
@@ -105,7 +169,9 @@ Deno.serve(async (req) => {
 
   try {
     const blocked = await lastAdminBlockMessage(serviceClient, userId);
-    if (blocked) return jsonResponse({ ok: false, error: blocked }, 400);
+    if (blocked) return jsonResponse({ ok: false, error: blocked });
+    const payoutBlocked = await payoutPersonBlockMessage(serviceClient, userId);
+    if (payoutBlocked) return jsonResponse({ ok: false, error: payoutBlocked });
   } catch (guardError) {
     console.error('[delete-my-account] last-admin check failed', guardError);
     await captureEdgeError('delete-my-account', guardError);
@@ -116,7 +182,8 @@ Deno.serve(async (req) => {
     try {
       // Refund captured payments and cancel holds while the ledger rows still
       // exist. A succeeded PaymentIntent cannot be cancelled. Do this only
-      // after the last-admin guard, so a refused delete does not refund anyone.
+      // after the last-admin and payout guards, so a refused delete does not
+      // refund anyone.
       await releaseUserUpcomingPayments(serviceClient, getStripe(), userId);
     } catch (stripeError) {
       console.error('[delete-my-account] could not release payments', stripeError);
@@ -127,23 +194,50 @@ Deno.serve(async (req) => {
 
   const { error: rpcError } = await callerClient.rpc('delete_my_account');
   if (rpcError) {
-    const message = rpcError.message ?? '';
-    if (message.startsWith('Promote another admin')) {
-      return jsonResponse({ ok: false, error: message }, 400);
-    }
+    const shown = shownRefusal(rpcError.message ?? '');
+    if (shown) return jsonResponse({ ok: false, error: shown });
     console.error('[delete-my-account] delete_my_account failed', rpcError);
     await captureEdgeError('delete-my-account', rpcError);
     return jsonResponse({ ok: false, error: "Couldn't delete your account. Please try again." }, 500);
+  }
+
+  let customer: { customerId: string | null; ready: boolean } = { customerId: null, ready: false };
+  if (Deno.env.get('STRIPE_SECRET_KEY')) {
+    try {
+      customer = await prepareStripeCustomerDeletion(serviceClient, getStripe(), userId);
+    } catch (customerError) {
+      console.error('[delete-my-account] could not check stripe customer', customerError);
+      await captureEdgeError('delete-my-account', customerError);
+      // The account deletion still finishes. The id may not have been read,
+      // so the alert carries the user id and ops can find the Customer in
+      // Stripe by metadata.user_id.
+      await captureEdgeAlert({
+        source: 'delete-my-account',
+        title: 'Stripe customer not deleted',
+        level: 'error',
+        tags: { alert: 'stripe_customer_not_deleted' },
+        extra: { userId, customerId: null, openIds: [] },
+      });
+    }
   }
 
   await emptyFolder(serviceClient, 'avatars', userId);
   await emptyFolder(serviceClient, 'group-covers', userId);
 
   const { error: deleteError } = await serviceClient.auth.admin.deleteUser(userId);
-  if (deleteError) {
+  if (deleteError && !authUserAlreadyGone(deleteError)) {
     console.error('[delete-my-account] auth.admin.deleteUser failed', deleteError);
     await captureEdgeError('delete-my-account', deleteError);
     return jsonResponse({ ok: false, error: "Couldn't delete your account. Please try again." }, 500);
+  }
+
+  if (customer.customerId && customer.ready && Deno.env.get('STRIPE_SECRET_KEY')) {
+    try {
+      await deleteSavedStripeCustomer(getStripe(), customer.customerId, userId);
+    } catch (customerError) {
+      console.error('[delete-my-account] could not delete stripe customer', customerError);
+      await captureEdgeError('delete-my-account', customerError);
+    }
   }
 
   return jsonResponse({ ok: true });

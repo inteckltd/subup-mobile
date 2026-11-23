@@ -1,6 +1,6 @@
 // Leave a paid / pending game: refund or cancel the PaymentIntent, then leave_game.
 
-import { refundCapturedOrCancel } from '../_shared/lock-runner.ts';
+import { refundCapturedOrCancel, settleFailedLeave } from '../_shared/lock-runner.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import {
@@ -59,7 +59,19 @@ Deno.serve(async (req) => {
     }
 
     const stripe = getStripe();
-    if (player.stripe_payment_intent_id) {
+    const paymentIntentId = player.stripe_payment_intent_id;
+    let stripeReleased = false;
+    if (paymentIntentId && (player.payment_status === 'authorized' || player.payment_status === 'card_saved')) {
+      // Detach before Stripe cancels. Otherwise payment_intent.canceled tells
+      // the player their hold expired, which is the wrong message for a leave.
+      const { error: detachError } = await service
+        .from('game_players')
+        .update({ stripe_payment_intent_id: null, payment_status: 'card_saved' })
+        .eq('id', player.id)
+        .eq('stripe_payment_intent_id', paymentIntentId);
+      if (detachError) throw detachError;
+    }
+    if (paymentIntentId) {
       const { data: payment, error: paymentError } = await service
         .from('game_payments')
         .select('pitch_cents')
@@ -72,10 +84,18 @@ Deno.serve(async (req) => {
       if (player.payment_status === 'paid' && payment?.pitch_cents == null) {
         return jsonResponse({ ok: false, error: "Couldn't refund this payment. Please try again." }, 400);
       }
+      let released: 'refunded' | 'canceled' | 'none' = 'none';
       try {
-        await refundCapturedOrCancel(stripe, service, player.stripe_payment_intent_id, payment?.pitch_cents ?? null);
+        released = await refundCapturedOrCancel(stripe, service, paymentIntentId, payment?.pitch_cents ?? null);
+        stripeReleased = true;
       } catch (releaseError) {
         if (!isIdempotentRefundError(releaseError)) {
+          await settleFailedLeave(service, {
+            playerId: player.id,
+            stripeReleased: false,
+            originalStatus: player.payment_status,
+            paymentIntentId,
+          });
           await captureEdgeError('leave-paid-game', releaseError);
           const message = releaseError instanceof Error ? releaseError.message : '';
           const refundFailed = player.payment_status === 'paid' || /pitch amount/i.test(message);
@@ -86,14 +106,55 @@ Deno.serve(async (req) => {
               : "Couldn't release the card hold. Please try again.",
           }, 400);
         }
+        stripeReleased = true;
       }
+      if (stripeReleased && released !== 'refunded' && (player.payment_status === 'authorized' || player.payment_status === 'card_saved')) {
+        // Close the ledger now. The cancel webhook is what used to do this,
+        // and until it lands the cron treats the row as a missed hold.
+        const { error: noteError } = await service.rpc('note_hold_canceled', {
+          p_payment_intent_id: paymentIntentId,
+        });
+        // Stripe has already cancelled. A ledger-note failure must not
+        // tell the player they could not leave.
+        if (noteError) {
+          console.error('[leave-paid-game] note_hold_canceled failed after Stripe cancel', noteError);
+          await captureEdgeError('leave-paid-game', noteError);
+        }
+      }
+      const { error: clearError } = await service
+        .from('game_players')
+        .update({
+          stripe_payment_intent_id: null,
+          stripe_payment_method_id: null,
+          offsession_attempted_at: new Date().toISOString(),
+          payment_status: player.payment_status === 'paid' ? 'refunded' : 'card_saved',
+        })
+        .eq('id', player.id);
+      if (clearError) throw clearError;
     }
 
     const anon = createAnonClient(req);
     const { data: promotedUserId, error: leaveError } = await anon.rpc('leave_game', { p_game_id: gameId });
     if (leaveError) {
+      const settled = await settleFailedLeave(service, {
+        playerId: player.id,
+        stripeReleased,
+        originalStatus: player.payment_status,
+        paymentIntentId,
+      });
+      if (settled.outcome === 'dropped') {
+        return jsonResponse({ ok: true, promotedUserId: settled.promotedUserId });
+      }
+      if (stripeReleased) {
+        return jsonResponse({
+          ok: false,
+          error: player.payment_status === 'paid'
+            ? "Your payment was refunded, but we couldn't remove you from the game. Please try again."
+            : "Your card won't be charged, but we couldn't remove you from the game. Please try again.",
+        });
+      }
       const message = leaveError.message ?? '';
-      if (/haven't joined|can't leave within|Game not found/i.test(message)) {
+      if (/haven't joined|can't leave within|Game not found|Refund the payment/i.test(message)) {
         return jsonResponse({ ok: false, error: message }, 400);
       }
       throw leaveError;

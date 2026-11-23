@@ -216,7 +216,61 @@ export const REFUND_ABANDONED_TITLE = 'Refund abandoned: manual action needed';
 
 /** A hold the bank did not keep. Safe to cancel and detach. */
 export function offSessionHoldIsDead(status: string): boolean {
-  return status === 'requires_payment_method' || status === 'canceled';
+  return status === 'requires_payment_method'
+    || status === 'requires_confirmation'
+    || status === 'canceled';
+}
+
+/**
+ * Moving kickoff or the lock later can push a bank hold past Stripe's
+ * ~7 day window. Release it and place a new one near the new lock.
+ * An earlier lock is captured sooner, so the existing hold can stay.
+ */
+export function laterLockReleasesHolds(oldLockMs: number, newLockMs: number): boolean {
+  return Number.isFinite(oldLockMs) && Number.isFinite(newLockMs) && newLockMs > oldLockMs;
+}
+
+/** Joining closes at the lock instant, whether or not the minimum is met. */
+export function joiningClosedAtLock(input: {
+  startsAtMs: number;
+  lockHours: number;
+  nowMs: number;
+}): boolean {
+  if (input.lockHours <= 0) return false;
+  return input.nowMs >= input.startsAtMs - input.lockHours * 60 * 60 * 1000;
+}
+
+/** A lock push is sent once. Shortfall and card messages are not tied to this run's games. */
+export function lockNotificationShouldPush(input: {
+  type: string | null;
+  pushedAt: string | null;
+  gameId: string | null;
+  gameIds: string[];
+  source?: string | null;
+}): boolean {
+  if (input.pushedAt) return false;
+  if (
+    input.type === 'game_shortfall'
+    || input.type === 'card_confirm'
+    || input.type === 'card_declined'
+    || input.type === 'spot_refunded'
+    || input.type === 'duplicate_refunded'
+  ) return true;
+  if (input.type === 'game_cancelled' || input.type === 'team_assigned') {
+    return !!input.gameId && input.gameIds.includes(input.gameId);
+  }
+  // The app pushes a leave's promotion itself. Only the lock cron's own
+  // promotions (source lock) are sent from here.
+  if (input.type === 'waitlist_promoted' && input.source === 'lock') return true;
+  return false;
+}
+
+export function shortfallAutoCancelsAtKickoff(input: {
+  startsAtMs: number;
+  shortfallOpen: boolean;
+  nowMs: number;
+}): boolean {
+  return input.shortfallOpen && Number.isFinite(input.startsAtMs) && input.nowMs >= input.startsAtMs;
 }
 
 /** Money or an authorisation is still at the bank. Never cancel these. */

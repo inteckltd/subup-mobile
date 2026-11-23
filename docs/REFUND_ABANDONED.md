@@ -56,7 +56,7 @@ Leave `refund_window_alerted_at` set unless you also want the 30-day alert to fi
 
 ## After 30 days
 
-The sweep and `refund-game-payments` both leave the game alone. Refund the PaymentIntent in the Stripe dashboard (pitch only when the player was seated; pitch and fee when they were not). Then, as service role, mark the ledger with the existing function and clear the give-up counters:
+The sweep and `refund-game-payments` both leave the game alone. The 30-day alert lists only a `succeeded` charge. A hold (`requires_capture`) or an abandoned checkout (`requires_payment`) is not alerted. Refund a succeeded PaymentIntent in the Stripe dashboard (pitch only when the player was seated; pitch and fee when they were not). Then, as service role, mark the ledger with the existing function and clear the give-up counters:
 
 ```sql
 select public.mark_game_payment_refunded('<payment intent id>', '<stripe refund id>');

@@ -3,7 +3,7 @@
 // is the other button, and it releases uncaptured holds for free.
 
 import { paymentIntentChargeId } from '../_shared/join-payment-flow.ts';
-import { confirmPaidJoin } from '../_shared/lock-runner.ts';
+import { captureOne, confirmPaidJoin } from '../_shared/lock-runner.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import { createAnonClient, getStripe, jsonResponse, requireUserId } from '../_shared/stripe.ts';
@@ -77,31 +77,33 @@ Deno.serve(async (req) => {
         await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: 'expired' });
         continue;
       }
-      try {
-        const intent = await stripe.paymentIntents.retrieve(player.stripe_payment_intent_id);
-        if (intent.status === 'processing') {
-          return jsonResponse({
-            ok: false,
-            error: 'A card is still being checked by the bank. Try again in a minute. No further cards will be charged until then.',
-          }, 400);
+      // Same read-back and second idempotency key as the lock cron. A timeout
+      // is not a decline, and must not drop a hold that is still fine.
+      const result = await captureOne(stripe, service, player.stripe_payment_intent_id);
+      if (result === 'pending') {
+        return jsonResponse({
+          ok: false,
+          error: 'A card is still being checked by the bank. Try again in a minute. No further cards will be charged until then.',
+        }, 400);
+      }
+      if (result === 'failed') {
+        // failed also means the PaymentIntent was already cancelled or
+        // refunded. Say the card was declined only when Stripe says so.
+        let reason: 'declined' | 'expired' = 'expired';
+        try {
+          const after = await stripe.paymentIntents.retrieve(player.stripe_payment_intent_id);
+          const paymentError = after.last_payment_error;
+          if (
+            paymentError?.type === 'card_error'
+            || paymentError?.code === 'card_declined'
+            || typeof paymentError?.decline_code === 'string'
+          ) {
+            reason = 'declined';
+          }
+        } catch (readError) {
+          console.error('[confirm-short-game] could not read the failed capture', readError);
         }
-        if (intent.status === 'succeeded') {
-          await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge), 'confirm-short-game');
-          continue;
-        }
-        if (intent.status !== 'requires_capture') {
-          await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: 'expired' });
-          continue;
-        }
-        const captured = await stripe.paymentIntents.capture(
-          intent.id,
-          {},
-          { idempotencyKey: `capture:${intent.id}` },
-        );
-        await confirmPaidJoin(service, stripe, captured.id, paymentIntentChargeId(captured.latest_charge), 'confirm-short-game');
-      } catch (captureError) {
-        console.error('[confirm-short-game] capture failed', player.id, captureError);
-        await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: 'declined' });
+        await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: reason });
       }
     }
 
