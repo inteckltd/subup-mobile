@@ -22,6 +22,10 @@ end$$;
 
 grant usage on schema public to anon, authenticated, service_role;
 
+-- Supabase grants execute on new public functions to these roles.
+-- The migrations have to revoke that themselves.
+alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+
 create table if not exists auth.users (
   id uuid primary key,
   email text,

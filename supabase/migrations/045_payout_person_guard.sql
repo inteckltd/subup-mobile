@@ -111,7 +111,7 @@ $$;
 comment on function public.delete_my_account() is
   'Caller leaves groups they do not solely administer, cancels invites, drops upcoming open/full spots, and removes push tokens and notifications. The client then deletes Storage files and the auth user. Refuses while they are the only admin, or still receive payouts, for a group that has other members.';
 
-revoke all on function public.delete_my_account() from public;
+revoke all on function public.delete_my_account() from public, anon;
 grant execute on function public.delete_my_account() to authenticated;
 
 create or replace function public.leave_group(p_group_id uuid)
@@ -178,7 +178,7 @@ $$;
 comment on function public.leave_group(uuid) is
   'Caller leaves the group. The last remaining member may leave; the empty group is then deleted. Refuses while the caller still receives the group''s payouts and other members remain.';
 
-revoke all on function public.leave_group(uuid) from public;
+revoke all on function public.leave_group(uuid) from public, anon;
 grant execute on function public.leave_group(uuid) to authenticated;
 
 create or replace function public.kick_group_member(p_group_id uuid, p_user_id uuid)
@@ -241,5 +241,5 @@ $$;
 comment on function public.kick_group_member(uuid, uuid) is
   'Admin removes another member. Refuses while that member still receives the group''s payouts.';
 
-revoke all on function public.kick_group_member(uuid, uuid) from public;
+revoke all on function public.kick_group_member(uuid, uuid) from public, anon;
 grant execute on function public.kick_group_member(uuid, uuid) to authenticated;

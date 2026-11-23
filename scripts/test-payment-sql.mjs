@@ -1,7 +1,8 @@
 // Apply migrations 001-047 on a throwaway local Postgres and run the
-// payment SQL cases. Refuses any host that is not loopback, and never
-// talks to Supabase. pg_cron and pg_net are stubbed; the migration files
-// themselves are not edited.
+// payment SQL cases. Refuses any host that is not loopback, any query
+// parameter that changes the connection target, and the libpq env vars
+// that can point psql elsewhere. Never talks to Supabase. pg_cron and
+// pg_net are stubbed; the migration files themselves are not edited.
 //
 //   PAYMENT_SQL_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run test:sql
 //
@@ -19,25 +20,45 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const maintenanceUrl = process.env.PAYMENT_SQL_DATABASE_URL
   ?? 'postgresql://postgres@127.0.0.1:5432/postgres';
 
-function connectionHost(connection) {
-  const match = connection.match(/^[a-z+]+:\/\/(?:[^@/]+@)?(\[[^\]]+\]|[^:/?#]+)/i);
-  return match ? match[1].replace(/^\[|\]$/g, '') : '';
-}
+const targetParams = new Set(['host', 'hostaddr', 'port', 'dbname', 'service']);
 
 function assertLocal(connection) {
-  if (/supabase\.(co|com)|pooler\.supabase/i.test(connection)) {
+  let url;
+  try {
+    url = new URL(connection);
+  } catch {
+    throw new Error('PAYMENT_SQL_DATABASE_URL must be a postgres URL.');
+  }
+  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
+    throw new Error('PAYMENT_SQL_DATABASE_URL must be a postgres URL.');
+  }
+  if (/supabase\.(co|com)|pooler\.supabase/i.test(url.href)) {
     throw new Error('Refusing to run the SQL test against Supabase.');
   }
-  const host = connectionHost(connection);
+  const host = url.hostname.replace(/^\[|\]$/g, '');
   if (!['localhost', '127.0.0.1', '::1'].includes(host)) {
     throw new Error(`Refusing non-local Postgres host "${host || '(missing)'}".`);
+  }
+  for (const key of url.searchParams.keys()) {
+    if (targetParams.has(key.toLowerCase())) {
+      throw new Error(`Refusing connection parameter "${key}".`);
+    }
   }
 }
 
 function databaseUrl(base, name) {
-  const match = base.match(/^([a-z+]+:\/\/[^/]+\/)([^/?]*)(.*)$/i);
-  if (!match) throw new Error('PAYMENT_SQL_DATABASE_URL must be a postgres URL.');
-  return `${match[1]}${name}${match[3] ?? ''}`;
+  const url = new URL(base);
+  url.pathname = `/${name}`;
+  return url.toString();
+}
+
+function psqlEnv() {
+  const env = { ...process.env };
+  delete env.PGHOST;
+  delete env.PGHOSTADDR;
+  delete env.PGSERVICE;
+  delete env.PGSERVICEFILE;
+  return env;
 }
 
 function psql(connection, { file, sql } = {}) {
@@ -46,6 +67,7 @@ function psql(connection, { file, sql } = {}) {
   const result = spawnSync('psql', args, {
     input: file ? undefined : sql,
     encoding: 'utf8',
+    env: psqlEnv(),
   });
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
   if (result.error) {
@@ -95,8 +117,8 @@ function main() {
 
     const output = psql(testUrl, { file: join(root, 'supabase/tests/payment-sql-cases.sql') });
     const passed = [...output.matchAll(/case ok: .+/g)].map((found) => found[0]);
-    if (passed.length !== 5) {
-      throw new Error(`Expected 5 SQL cases, saw ${passed.length}.\n${output}`);
+    if (passed.length !== 6) {
+      throw new Error(`Expected 6 SQL cases, saw ${passed.length}.\n${output}`);
     }
     console.log(`payment sql: ${passed.length} passed`);
     for (const line of passed) console.log(`  ${line}`);

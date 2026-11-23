@@ -62,6 +62,9 @@ begin
 end;
 $$;
 
+revoke all on function public.release_holds_when_lock_moves() from public, anon, authenticated;
+grant execute on function public.release_holds_when_lock_moves() to service_role;
+
 drop trigger if exists games_release_holds_when_lock_moves on public.games;
 create trigger games_release_holds_when_lock_moves
   before update on public.games
@@ -146,7 +149,7 @@ begin
 end;
 $$;
 
-revoke all on function public.promote_waitlist_if_going_ahead(uuid) from public;
+revoke all on function public.promote_waitlist_if_going_ahead(uuid) from public, anon, authenticated;
 grant execute on function public.promote_waitlist_if_going_ahead(uuid) to service_role;
 
 

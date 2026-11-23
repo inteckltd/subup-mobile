@@ -15,19 +15,27 @@ declare
   v_held integer;
   v_promoted uuid;
 begin
+  -- Read the game without a lock, then lock the game before the player.
+  -- leave_game and apply_game_lock_window lock the game first. Locking
+  -- the player first deadlocks with them.
+  select game_id into v_game_id
+  from public.game_players
+  where id = p_player_id;
+
+  if v_game_id is null then
+    return null;
+  end if;
+
+  perform 1 from public.games where id = v_game_id for update;
+
   select * into v_player
   from public.game_players
   where id = p_player_id
   for update;
 
-  if v_player.id is null then
+  if v_player.id is null or v_player.game_id is distinct from v_game_id then
     return null;
   end if;
-
-  v_game_id := v_player.game_id;
-  -- Same lock as leave_game, so a join cannot take the freed spot
-  -- before the waitlist is promoted.
-  perform 1 from public.games where id = v_game_id for update;
 
   delete from public.game_players where id = v_player.id;
 

@@ -27,6 +27,7 @@ declare
   v_game_status public.game_status;
   v_max integer;
   v_notices integer;
+  v_fn text;
 begin
   insert into auth.users (id, phone, email)
   values
@@ -199,5 +200,42 @@ begin
     raise exception 'waitlist leave wrote a promotion notice';
   end if;
   raise notice 'case ok: dropping a waitlisted row does not promote';
+
+  foreach v_fn in array array[
+    'public.release_holds_when_lock_moves()',
+    'public.promote_waitlist_if_going_ahead(uuid)',
+    'public.apply_game_lock_window()',
+    'public.expire_pending_joins()',
+    'public.confirm_shortfall_teams(uuid)',
+    'public.drop_player_after_released_leave(uuid)'
+  ]
+  loop
+    if has_function_privilege('anon', v_fn::regprocedure, 'execute')
+       or has_function_privilege('authenticated', v_fn::regprocedure, 'execute') then
+      raise exception 'service function % is callable by anon or authenticated', v_fn;
+    end if;
+    if not has_function_privilege('service_role', v_fn::regprocedure, 'execute') then
+      raise exception 'service function % is not callable by service_role', v_fn;
+    end if;
+  end loop;
+
+  foreach v_fn in array array[
+    'public.join_game(uuid)',
+    'public.reserve_paid_join(uuid)',
+    'public.leave_game(uuid)',
+    'public.get_my_game_player_payment_ids(uuid)',
+    'public.delete_my_account()',
+    'public.leave_group(uuid)',
+    'public.kick_group_member(uuid, uuid)'
+  ]
+  loop
+    if not has_function_privilege('authenticated', v_fn::regprocedure, 'execute') then
+      raise exception 'app function % is not callable by authenticated', v_fn;
+    end if;
+    if has_function_privilege('anon', v_fn::regprocedure, 'execute') then
+      raise exception 'app function % is callable by anon', v_fn;
+    end if;
+  end loop;
+  raise notice 'case ok: service functions are not executable by anon or authenticated';
 end
 $cases$;

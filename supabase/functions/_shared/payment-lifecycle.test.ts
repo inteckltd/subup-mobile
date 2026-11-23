@@ -1070,6 +1070,8 @@ test('migration 042 closes joining, guards leave, and will not pick unsettled te
   assert.match(promoted, /'pending'::public\.payment_status/);
   assert.match(promoted, /'paid'::public\.payment_status/);
   assert.equal(promoted.includes("then 'pending' else 'paid'"), false);
+  assert.match(promoted, /revoke all on function public\.promote_waitlist_if_going_ahead\(uuid\) from public, anon, authenticated/);
+  assert.match(sql, /revoke all on function public\.release_holds_when_lock_moves\(\) from public, anon, authenticated/);
   assert.match(sql, /coalesce\(nullif\(v_game\.title, ''\), v_group_name, 'A game'\) \|\| ' did not get a decision by kickoff/);
 });
 
@@ -1658,6 +1660,9 @@ test('payout person, capture retry, and future player columns are guarded', () =
   assert.match(body(payout, 'kick_group_member('), /Make another member an admin in %s, then move payouts to them, before removing them/);
   assert.match(body(payout, 'leave_group('), /Promote another admin before leaving or removing the last admin/);
   assert.match(body(payout, 'kick_group_member('), /Promote another admin before leaving or removing the last admin/);
+  assert.match(payout, /revoke all on function public\.delete_my_account\(\) from public, anon/);
+  assert.match(payout, /revoke all on function public\.leave_group\(uuid\) from public, anon/);
+  assert.match(payout, /revoke all on function public\.kick_group_member\(uuid, uuid\) from public, anon/);
   assert.match(confirmShort, /captureOne\(/);
   assert.equal(confirmShort.includes('paymentIntents.capture'), false);
   assert.match(confirmShort, /reason = 'declined'/);
@@ -1679,9 +1684,13 @@ test('payout person, capture retry, and future player columns are guarded', () =
   assert.match(notifyWait, /source === 'lock'/);
   const droppedLeave = readFileSync(join(root, 'supabase/migrations/047_drop_released_leave.sql'), 'utf8');
   assert.match(droppedLeave, /if not v_player\.is_waitlisted then/);
+  const readGame = droppedLeave.indexOf('select game_id into v_game_id');
+  const lockGame = droppedLeave.indexOf('from public.games where id = v_game_id for update');
+  const lockPlayer = droppedLeave.indexOf('where id = p_player_id\n  for update');
   const promoteCall = droppedLeave.indexOf('v_promoted := public.promote_waitlist_if_going_ahead');
   const recountCall = droppedLeave.indexOf('v_held := public.game_held_spots');
-  assert.ok(promoteCall > 0 && recountCall > promoteCall);
+  assert.ok(readGame > 0 && lockGame > readGame && lockPlayer > lockGame && promoteCall > lockPlayer && recountCall > promoteCall);
+  assert.match(droppedLeave, /v_player\.id is null or v_player\.game_id is distinct from v_game_id/);
   assert.match(droppedLeave, /when status = 'full' and v_held < max_players then 'open'/);
   assert.match(grantCheck, /has_column_privilege/);
   assert.match(grantCheck, /next_detach_check_at/);
