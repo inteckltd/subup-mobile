@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { authorizeJoin, cancelDetachedHolds, cancelUndecidedShortGames, claimLockNotificationPushes, confirmPaidJoin, deleteSavedStripeCustomer, noteJoinPaymentFailed, placeDueOffSessionHolds, prepareStripeCustomerDeletion, releaseOutstandingCancelledGame, releaseUserUpcomingPayments, settleLocksBeforeSql, sweepCancelledGameRefunds, tidyOrphanedSetupIntents } from './lock-runner.ts';
+import { authorizeJoin, cancelDetachedHolds, cancelUndecidedShortGames, claimLockNotificationPushes, confirmPaidJoin, deleteSavedStripeCustomer, noteJoinPaymentFailed, placeDueOffSessionHolds, prepareStripeCustomerDeletion, releaseOutstandingCancelledGame, releaseUserUpcomingPayments, settleFailedLeave, settleLocksBeforeSql, sweepCancelledGameRefunds, tidyOrphanedSetupIntents } from './lock-runner.ts';
 import { REFUND_ABANDONED_TITLE } from './payment-hotfix.ts';
 import { refundPaymentIntent } from './refunds.ts';
 
@@ -42,6 +42,7 @@ type Database = {
   notifications: Row[];
   dueHolds: Row[];
   stripe_customers: Row[];
+  lock_push_cursor: Row[];
 };
 
 function project(row: Row, select: string | null): Row {
@@ -55,6 +56,11 @@ function project(row: Row, select: string | null): Row {
 
 function orMatches(expression: string, row: Row): boolean {
   return expression.split(',').some((part) => {
+    const typed = part.match(/^data->>type\.eq\.(.+)$/);
+    if (typed) {
+      const data = row.data as { type?: string } | null | undefined;
+      return data?.type === typed[1];
+    }
     const match = part.match(/^([a-z_]+)\.(eq|gte|gt|is|neq)\.(.*)$/);
     if (!match) return false;
     const [, column, op, raw] = match;
@@ -96,9 +102,12 @@ function matches(row: Row, filters: Filter[]): boolean {
 function query(db: Database, table: keyof Database) {
   const filters: Filter[] = [];
   let selected: string | null = null;
-  let mode: 'select' | 'update' | 'insert' = 'select';
+  let mode: 'select' | 'update' | 'insert' | 'delete' = 'select';
   let patch: Row | null = null;
   let inserted: Row | null = null;
+  let orderColumn: string | null = null;
+  let orderAscending = true;
+  let rowLimit: number | null = null;
 
   const builder = {
     select(columns: string) {
@@ -113,6 +122,19 @@ function query(db: Database, table: keyof Database) {
     insert(row: Row) {
       mode = 'insert';
       inserted = row;
+      return builder;
+    },
+    delete() {
+      mode = 'delete';
+      return builder;
+    },
+    order(column: string, options?: { ascending?: boolean }) {
+      orderColumn = column;
+      orderAscending = options?.ascending !== false;
+      return builder;
+    },
+    limit(count: number) {
+      rowLimit = count;
       return builder;
     },
     eq(column: string, value: unknown) {
@@ -172,7 +194,20 @@ function query(db: Database, table: keyof Database) {
       rows().push(inserted);
       return { data: null, error: null };
     }
-    const found = rows().filter((row) => matches(row, filters));
+    let found = rows().filter((row) => matches(row, filters));
+    if (mode === 'delete') {
+      const keep = rows().filter((row) => !matches(row, filters));
+      rows().splice(0, rows().length, ...keep);
+      return { data: null, error: null };
+    }
+    if (orderColumn) {
+      const column = orderColumn;
+      found = found.slice().sort((a, b) => {
+        const compared = String(a[column] ?? '').localeCompare(String(b[column] ?? ''));
+        return orderAscending ? compared : -compared;
+      });
+    }
+    if (rowLimit != null) found = found.slice(0, rowLimit);
     if (mode === 'update' && patch) {
       for (const row of found) Object.assign(row, patch);
       if (selected) return { data: found.map((row) => project(row, selected)), error: null };
@@ -308,7 +343,15 @@ function ledgerRpc(db: Database) {
 }
 
 function emptyDb(): Database {
-  return { games: [], game_payments: [], game_players: [], notifications: [], dueHolds: [], stripe_customers: [] };
+  return {
+    games: [],
+    game_payments: [],
+    game_players: [],
+    notifications: [],
+    dueHolds: [],
+    stripe_customers: [],
+    lock_push_cursor: [{ id: 'notifications', push_after: '2000-01-01T00:00:00.000Z' }],
+  };
 }
 
 function holdIntent(id: string) {
@@ -1180,9 +1223,11 @@ test('the Stripe customer is deleted only after the account is gone, and only wh
   const releaseAt = accountDeletion.indexOf('releaseUserUpcomingPayments(');
   const prepareAt = accountDeletion.indexOf('prepareStripeCustomerDeletion(');
   const payoutAt = accountDeletion.indexOf('payoutPersonBlockMessage(');
+  const rpcAt = accountDeletion.indexOf("rpc('delete_my_account')");
   assert.ok(payoutAt > 0 && payoutAt < releaseAt);
-  assert.ok(releaseAt < prepareAt && prepareAt < accountDeletion.indexOf("rpc('delete_my_account')"));
-  assert.ok(userGone > 0 && customerGone > userGone);
+  assert.ok(releaseAt < rpcAt && rpcAt < prepareAt);
+  assert.ok(prepareAt < userGone && userGone < customerGone);
+  assert.match(accountDeletion, /authUserAlreadyGone/);
 
   function stripeFor(
     payments: { id: string; status: string }[],
@@ -1564,6 +1609,11 @@ test('payout person, capture retry, and future player columns are guarded', () =
   assert.match(account, /starts_at > now\(\)/);
   assert.match(body(payout, 'kick_group_member('), /Only group admins can remove members/);
   assert.match(body(payout, 'kick_group_member('), /That person is not a member of this group/);
+  assert.match(account, /Ask an admin of %s to move payouts to someone else/);
+  assert.match(account, /Make another member an admin in %s, then move payouts to them/);
+  assert.match(body(payout, 'leave_group('), /Ask an admin of %s to move payouts to someone else before leaving/);
+  assert.match(body(payout, 'leave_group('), /Make another member an admin in %s, then move payouts to them, before leaving/);
+  assert.match(body(payout, 'kick_group_member('), /Make another member an admin in %s, then move payouts to them, before removing them/);
   assert.match(body(payout, 'leave_group('), /Promote another admin before leaving or removing the last admin/);
   assert.match(body(payout, 'kick_group_member('), /Promote another admin before leaving or removing the last admin/);
   assert.match(confirmShort, /captureOne\(/);
@@ -1602,4 +1652,132 @@ test('payout person, capture retry, and future player columns are guarded', () =
   withFuture.add('future_note');
   assert.equal(granted.has('future_note'), false);
   assert.equal([...withFuture].every((column) => granted.has(column) || hidden.has(column) || column === 'future_note'), true);
+});
+
+test('a failed leave after the refund or hold cancel does not restore the seat', async () => {
+  const refunded = emptyDb();
+  refunded.game_players.push({
+    id: 'gp-paid', payment_status: 'refunded', stripe_payment_intent_id: null,
+  });
+  const refundResult = await settleFailedLeave(serviceFor(refunded, ledgerRpc(refunded)) as never, {
+    playerId: 'gp-paid',
+    stripeReleased: true,
+    originalStatus: 'paid',
+    paymentIntentId: 'pi_paid',
+  });
+  assert.equal(refundResult, 'dropped');
+  assert.equal(refunded.game_players.length, 0);
+
+  const held = emptyDb();
+  held.game_players.push({
+    id: 'gp-hold', payment_status: 'card_saved', stripe_payment_intent_id: null,
+  });
+  const holdResult = await settleFailedLeave(serviceFor(held, ledgerRpc(held)) as never, {
+    playerId: 'gp-hold',
+    stripeReleased: true,
+    originalStatus: 'authorized',
+    paymentIntentId: 'pi_hold',
+  });
+  assert.equal(holdResult, 'dropped');
+  assert.equal(held.game_players.length, 0);
+
+  const kept = emptyDb();
+  kept.game_players.push({
+    id: 'gp-open', payment_status: 'card_saved', stripe_payment_intent_id: null,
+  });
+  const restoreResult = await settleFailedLeave(serviceFor(kept, ledgerRpc(kept)) as never, {
+    playerId: 'gp-open',
+    stripeReleased: false,
+    originalStatus: 'authorized',
+    paymentIntentId: 'pi_open',
+  });
+  assert.equal(restoreResult, 'restored');
+  assert.equal(kept.game_players[0].payment_status, 'authorized');
+  assert.equal(kept.game_players[0].stripe_payment_intent_id, 'pi_open');
+});
+
+test('a lock move is not undone when the cron cancels the detached hold', async () => {
+  const db = emptyDb();
+  db.games.push({ id: 'g1', status: 'open', group_id: 'grp' });
+  db.game_players.push({
+    id: 'gp', game_id: 'g1', user_id: 'u1', payment_status: 'card_saved', stripe_payment_intent_id: null,
+  });
+  db.game_payments.push({
+    id: 'moved',
+    game_id: 'g1',
+    user_id: 'u1',
+    game_player_id: 'gp',
+    status: 'requires_capture',
+    stripe_payment_intent_id: 'pi_hold',
+  });
+  const restores: string[] = [];
+  const cancels: string[] = [];
+  const rpc = (name: string, args: Record<string, unknown>) => {
+    if (name === 'restore_orphaned_join') restores.push(String(args.p_payment_intent_id));
+    return ledgerRpc(db)(name, args);
+  };
+  const stripe = {
+    paymentIntents: {
+      retrieve: async (id: string) => ({ id, status: 'requires_capture', payment_method: 'pm_1', latest_charge: null }),
+      cancel: async (id: string) => {
+        cancels.push(id);
+        return { id, status: 'canceled' };
+      },
+    },
+  };
+  await cancelDetachedHolds(serviceFor(db, rpc) as never, stripe as never);
+  assert.deepEqual(restores, []);
+  assert.deepEqual(cancels, ['pi_hold']);
+  assert.equal(db.game_players[0].payment_status, 'card_saved');
+  assert.equal(db.game_players[0].stripe_payment_intent_id ?? null, null);
+  assert.equal(db.game_payments[0].status, 'canceled');
+  assert.equal(db.notifications.some((row) => row.title === "We couldn't keep your spot"), false);
+
+  const orphan = emptyDb();
+  orphan.games.push({ id: 'g1', status: 'open', group_id: 'grp' });
+  orphan.game_payments.push({
+    id: 'gone',
+    game_id: 'g1',
+    user_id: 'u1',
+    game_player_id: null,
+    status: 'requires_capture',
+    stripe_payment_intent_id: 'pi_orphan',
+    pitch_cents: 1000,
+  });
+  await cancelDetachedHolds(serviceFor(orphan, ledgerRpc(orphan)) as never, stripe as never);
+  assert.equal(orphan.notifications.filter((row) => row.title === "We couldn't keep your spot").length, 1);
+  assert.equal(orphan.game_payments[0].status, 'canceled');
+});
+
+test('the first lock run does not re-send pushes the old cron already delivered', async () => {
+  const db = emptyDb();
+  db.lock_push_cursor = [];
+  const now = Date.parse('2026-11-23T12:00:00.000Z');
+  db.notifications.push({
+    id: 'old',
+    user_id: 'u1',
+    title: 'Game is short',
+    body: 'Already sent',
+    data: { type: 'game_shortfall', gameId: 'g1' },
+    pushed_at: null,
+    created_at: new Date(now - 60 * 60 * 1000).toISOString(),
+  });
+  const service = serviceFor(db, ledgerRpc(db));
+  const first = await claimLockNotificationPushes(service as never, ['g1'], now);
+  assert.deepEqual(first, []);
+  assert.equal(db.notifications[0].pushed_at ?? null, null);
+  assert.equal(typeof db.lock_push_cursor[0]?.push_after, 'string');
+
+  db.notifications.push({
+    id: 'fresh',
+    user_id: 'u1',
+    title: 'Card declined',
+    body: 'Try another card',
+    data: { type: 'card_declined', gameId: 'g1' },
+    pushed_at: null,
+    created_at: new Date(now + 60 * 1000).toISOString(),
+  });
+  const second = await claimLockNotificationPushes(service as never, ['g1'], now + 5 * 60 * 1000);
+  assert.deepEqual(second.map((row) => row.id), ['fresh']);
+  assert.equal(db.notifications.find((row) => row.id === 'old')?.pushed_at ?? null, null);
 });

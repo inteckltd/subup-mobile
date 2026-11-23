@@ -617,7 +617,7 @@ async function stampDetachRecheck(service: SupabaseClient, paymentId: string, no
 export async function cancelDetachedHolds(service: SupabaseClient, stripe: Stripe): Promise<number> {
   const { data, error } = await service
     .from('game_payments')
-    .select('id, stripe_payment_intent_id, next_detach_check_at')
+    .select('id, stripe_payment_intent_id, next_detach_check_at, game_player_id')
     .in('status', ['requires_capture', 'requires_payment'])
     .not('stripe_payment_intent_id', 'is', null);
   if (error) throw error;
@@ -627,6 +627,7 @@ export async function cancelDetachedHolds(service: SupabaseClient, stripe: Strip
     id: string;
     stripe_payment_intent_id: string | null;
     next_detach_check_at: string | null;
+    game_player_id: string | null;
   }[]) {
     if (!row.stripe_payment_intent_id) continue;
     const waitUntil = row.next_detach_check_at ? Date.parse(row.next_detach_check_at) : Number.NaN;
@@ -638,6 +639,17 @@ export async function cancelDetachedHolds(service: SupabaseClient, stripe: Strip
       .maybeSingle();
     if (playerError) throw playerError;
     if (player) continue;
+    const linkedId = row.game_player_id;
+    let seatRemains = false;
+    if (linkedId) {
+      const { data: linked, error: linkedError } = await service
+        .from('game_players')
+        .select('id')
+        .eq('id', linkedId)
+        .maybeSingle();
+      if (linkedError) throw linkedError;
+      seatRemains = !!linked;
+    }
     try {
       const intent = await stripe.paymentIntents.retrieve(row.stripe_payment_intent_id);
       if (intent.status === 'succeeded') {
@@ -648,7 +660,10 @@ export async function cancelDetachedHolds(service: SupabaseClient, stripe: Strip
         await stampDetachRecheck(service, row.id, now);
         continue;
       }
-      if (intent.status === 'requires_capture') {
+      // A lock move or a leave clears the PaymentIntent but leaves the player
+      // row. Restoring would put that hold back. Only a missing player is a
+      // late checkout that might still buy the spot.
+      if (intent.status === 'requires_capture' && !seatRemains) {
         const { data: restored, error: restoreError } = await service.rpc('restore_orphaned_join', {
           p_payment_intent_id: intent.id,
           p_outcome: 'authorized',
@@ -657,12 +672,14 @@ export async function cancelDetachedHolds(service: SupabaseClient, stripe: Strip
         if (restoreError) throw restoreError;
         if (restored === 'restored' || restored === 'already_live') continue;
       }
+      if (!seatRemains) await markSpotMissed(service, intent.id, 'hold_canceled');
       if (intent.status !== 'canceled') await stripe.paymentIntents.cancel(intent.id);
       const { error: markError } = await service
         .from('game_payments')
         .update({ status: 'canceled' })
         .eq('id', row.id);
       if (markError) throw markError;
+      if (!seatRemains) await notifySpotMissed(service, intent.id);
       cancelled += 1;
     } catch (cancelError) {
       console.error('[lock] detach hold cancel failed', row.stripe_payment_intent_id, cancelError);
@@ -726,31 +743,77 @@ type PushRow = {
 
 const PUSH_LOOKBACK_MS = 6 * 60 * 60 * 1000;
 const PUSH_CLAIM_CAP = 25;
+const PUSH_CURSOR_ID = 'notifications';
+const LOCK_PUSH_TYPES = [
+  'game_shortfall',
+  'card_confirm',
+  'card_declined',
+  'spot_refunded',
+  'duplicate_refunded',
+  'game_cancelled',
+  'team_assigned',
+];
+
+/**
+ * The first run records now and sends nothing. The previous cron already
+ * delivered shortfall and card pushes without setting pushed_at, so a
+ * look-back must not send those again. Later runs send only notices created
+ * after that moment.
+ */
+async function pushCursor(service: SupabaseClient, nowMs: number): Promise<string | null> {
+  const { data, error } = await service
+    .from('lock_push_cursor')
+    .select('push_after')
+    .eq('id', PUSH_CURSOR_ID)
+    .maybeSingle();
+  if (error) throw error;
+  const existing = (data as { push_after?: string | null } | null)?.push_after;
+  if (existing) return existing;
+  const pushAfter = new Date(nowMs).toISOString();
+  const { error: insertError } = await service
+    .from('lock_push_cursor')
+    .insert({ id: PUSH_CURSOR_ID, push_after: pushAfter });
+  if (insertError) {
+    const { data: raced, error: racedError } = await service
+      .from('lock_push_cursor')
+      .select('push_after')
+      .eq('id', PUSH_CURSOR_ID)
+      .maybeSingle();
+    if (racedError) throw racedError;
+    const afterRace = (raced as { push_after?: string | null } | null)?.push_after;
+    if (afterRace) return afterRace;
+    throw insertError;
+  }
+  return null;
+}
 
 /**
  * Stamp pushed_at while it is still null and return only the rows this run
- * claimed. A cron outage of a few hours still delivers the push. Each run
- * sends at most 25, oldest first, so the rest wait for the next tick.
+ * claimed. A cron outage of a few hours still delivers a push the new code
+ * created. Each run asks for at most 25, oldest first.
  */
 export async function claimLockNotificationPushes(
   service: SupabaseClient,
   gameIds: string[],
   nowMs = Date.now(),
 ): Promise<PushRow[]> {
+  const cursor = await pushCursor(service, nowMs);
+  if (!cursor) return [];
   const since = new Date(nowMs - PUSH_LOOKBACK_MS).toISOString();
+  const windowStart = cursor > since ? cursor : since;
   const { data, error } = await service
     .from('notifications')
     .select('id, user_id, title, body, data, pushed_at, created_at')
-    .gte('created_at', since)
-    .is('pushed_at', null);
+    .gte('created_at', windowStart)
+    .is('pushed_at', null)
+    .or(LOCK_PUSH_TYPES.map((type) => `data->>type.eq.${type}`).join(','))
+    .order('created_at', { ascending: true })
+    .limit(PUSH_CLAIM_CAP);
   if (error) throw error;
-  const rows = ((data ?? []) as PushRow[])
-    .slice()
-    .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
+  const rows = (data ?? []) as PushRow[];
   const claimed: PushRow[] = [];
   const stampedAt = new Date(nowMs).toISOString();
   for (const row of rows) {
-    if (claimed.length >= PUSH_CLAIM_CAP) break;
     const type = typeof row.data?.type === 'string' ? row.data.type : null;
     const gameId = typeof row.data?.gameId === 'string' ? row.data.gameId : null;
     if (!lockNotificationShouldPush({ type, pushedAt: row.pushed_at, gameId, gameIds })) continue;
@@ -945,6 +1008,43 @@ export async function releaseExpiredPayment(
   }
   const { error } = await service.rpc('note_hold_canceled', { p_payment_intent_id: intent.id });
   if (error) throw error;
+}
+
+/**
+ * leave_game failed after this request. If Stripe has not moved money, put
+ * the seat back. If the refund or hold cancel already happened, remove the
+ * seat. Never write paid or authorized back onto a PaymentIntent that has
+ * already been refunded or cancelled.
+ */
+export async function settleFailedLeave(
+  service: SupabaseClient,
+  input: {
+    playerId: string;
+    stripeReleased: boolean;
+    originalStatus: string;
+    paymentIntentId: string | null;
+  },
+): Promise<'dropped' | 'restored' | 'unchanged'> {
+  if (!input.stripeReleased) {
+    if (
+      input.paymentIntentId
+      && (input.originalStatus === 'authorized' || input.originalStatus === 'card_saved')
+    ) {
+      const { error } = await service
+        .from('game_players')
+        .update({
+          stripe_payment_intent_id: input.paymentIntentId,
+          payment_status: input.originalStatus,
+        })
+        .eq('id', input.playerId);
+      if (error) throw error;
+      return 'restored';
+    }
+    return 'unchanged';
+  }
+  const { error } = await service.from('game_players').delete().eq('id', input.playerId);
+  if (error) return 'unchanged';
+  return 'dropped';
 }
 
 /**
@@ -1305,7 +1405,7 @@ async function notifySpotMissed(service: SupabaseClient, paymentIntentId: string
     .eq('game_id', row.game_id)
     .eq('user_id', row.user_id)
     .eq('is_waitlisted', false)
-    .neq('payment_status', 'refunded');
+    .in('payment_status', ['paid', 'authorized']);
   if (seatError) throw seatError;
   const stillIn = Array.isArray(seats) && seats.length > 0;
 

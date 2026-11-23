@@ -48,7 +48,20 @@ begin
       using errcode = 'P0001';
   end if;
 
-  select array_agg(g.name order by g.name)
+  select array_agg(
+    case
+      when not exists (
+        select 1 from public.group_members me
+        where me.group_id = g.id and me.user_id = v_uid and me.role = 'admin'
+      ) then format('Ask an admin of %s to move payouts to someone else.', g.name)
+      when not exists (
+        select 1 from public.group_members other
+        where other.group_id = g.id and other.user_id <> v_uid and other.role = 'admin'
+      ) then format('Make another member an admin in %s, then move payouts to them.', g.name)
+      else format('Move payouts to another admin in %s.', g.name)
+    end
+    order by g.name
+  )
   into v_names
   from public.groups g
   where g.payout_user_id = v_uid
@@ -57,17 +70,10 @@ begin
       where other.group_id = g.id and other.user_id <> v_uid
     );
 
-  if v_names is not null and cardinality(v_names) = 1 then
-    raise exception '%', format(
-      'You receive this group''s payments. Move payouts to another admin in %s before deleting your account.',
-      v_names[1]
-    );
-  end if;
-
   if v_names is not null then
     raise exception '%', format(
-      'You receive payments for %s. Move payouts to another admin in those groups before deleting your account.',
-      array_to_string(v_names, ', ')
+      'You receive this group''s payments. %s Do that before deleting your account.',
+      array_to_string(v_names, ' ')
     );
   end if;
 
@@ -116,6 +122,9 @@ set search_path = public, pg_temp
 as $$
 declare
   v_name text;
+  v_is_admin boolean;
+  v_other_admins integer;
+  v_rest text;
 begin
   if auth.uid() is null then
     raise exception 'Not authenticated' using errcode = '42501';
@@ -129,7 +138,7 @@ begin
   end if;
 
   -- The sentence starts with the wording the live 1.0.6 app already shows
-  -- in full. The rest tells them where to move payouts.
+  -- in full. The rest matches what that person can actually do.
   select g.name into v_name
   from public.groups g
   where g.id = p_group_id
@@ -140,10 +149,21 @@ begin
     );
 
   if v_name is not null then
-    raise exception '%', format(
-      'Promote another admin before leaving or removing the last admin. You receive this group''s payments. Move payouts to another admin in %s before leaving.',
-      v_name
-    );
+    select exists (
+      select 1 from public.group_members me
+      where me.group_id = p_group_id and me.user_id = auth.uid() and me.role = 'admin'
+    ) into v_is_admin;
+    select count(*) into v_other_admins
+    from public.group_members other
+    where other.group_id = p_group_id and other.user_id <> auth.uid() and other.role = 'admin';
+    if not v_is_admin then
+      v_rest := format('Ask an admin of %s to move payouts to someone else before leaving.', v_name);
+    elsif v_other_admins = 0 then
+      v_rest := format('Make another member an admin in %s, then move payouts to them, before leaving.', v_name);
+    else
+      v_rest := format('You receive this group''s payments. Move payouts to another admin in %s before leaving.', v_name);
+    end if;
+    raise exception '%', 'Promote another admin before leaving or removing the last admin. ' || v_rest;
   end if;
 
   delete from public.group_members
@@ -169,6 +189,8 @@ set search_path = public, pg_temp
 as $$
 declare
   v_name text;
+  v_admins integer;
+  v_rest text;
 begin
   if auth.uid() is null then
     raise exception 'Not authenticated' using errcode = '42501';
@@ -199,10 +221,16 @@ begin
     );
 
   if v_name is not null then
-    raise exception '%', format(
-      'Promote another admin before leaving or removing the last admin. They receive this group''s payments. Move payouts to another admin in %s before removing them.',
-      v_name
-    );
+    select count(*) into v_admins
+    from public.group_members admin
+    where admin.group_id = p_group_id and admin.role = 'admin';
+    -- Change treasurer is only on screen when the group has two admins.
+    if v_admins < 2 then
+      v_rest := format('Make another member an admin in %s, then move payouts to them, before removing them.', v_name);
+    else
+      v_rest := format('They receive this group''s payments. Move payouts to another admin in %s before removing them.', v_name);
+    end if;
+    raise exception '%', 'Promote another admin before leaving or removing the last admin. ' || v_rest;
   end if;
 
   delete from public.group_members

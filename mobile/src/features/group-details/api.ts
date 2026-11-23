@@ -132,6 +132,8 @@ const MUTATION_MESSAGES = [
   "You receive this group's payments",
   'You receive payments for',
   "They receive this group's payments",
+  'Ask an admin of',
+  'Make another member an admin',
   'Use leave group to remove yourself',
   'You are not a member of this group',
   'That person is not a member of this group',

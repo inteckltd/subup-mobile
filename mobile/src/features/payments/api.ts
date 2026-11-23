@@ -184,12 +184,12 @@ export async function startConnectOnboarding(): Promise<{ url?: string; error?: 
   return { url: data.url as string };
 }
 
-function paymentSyncNeedsRetry(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const name = 'name' in error ? String((error as { name: unknown }).name) : '';
-  if (name === 'FunctionsFetchError') return true;
-  const message = 'message' in error ? String((error as { message: unknown }).message) : '';
-  return /network request failed|failed to fetch|network error/i.test(message);
+const STILL_CHECKING = "We're still checking your payment. Open the game in a moment to see if you're in.";
+
+function syncFailureStatus(error: unknown): number | null {
+  if (!error || typeof error !== 'object' || !('context' in error)) return null;
+  const context = (error as { context?: { status?: number } }).context;
+  return typeof context?.status === 'number' ? context.status : null;
 }
 
 export async function payToJoinGame(gameId: string): Promise<{ error?: string }> {
@@ -228,10 +228,13 @@ export async function payToJoinGame(gameId: string): Promise<{ error?: string }>
   }
 
   const synced = await supabase.functions.invoke('sync-join-payment', { body: { gameId } });
-  if (paymentSyncNeedsRetry(synced.error)) {
-    return { error: "We're still checking your payment. Open the game in a moment to see if you're in." };
+  if (synced.error) {
+    if (syncFailureStatus(synced.error) === 409) {
+      return { error: await invokeFunctionError(synced.data, synced.error, "Couldn't keep your spot. You are not in this game.") };
+    }
+    return { error: STILL_CHECKING };
   }
-  if (synced.error || synced.data?.ok === false) {
+  if (synced.data?.ok === false) {
     return { error: synced.data?.error ?? "Couldn't keep your spot. You are not in this game." };
   }
   if (synced.data?.status === 'refunded') {

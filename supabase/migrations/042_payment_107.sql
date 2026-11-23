@@ -11,6 +11,21 @@ alter table public.notifications
 comment on column public.notifications.pushed_at is
   'Set when a push for this row was claimed, so the lock cron sends each shortfall and card message once.';
 
+-- The previous cron sent shortfall and card pushes without setting pushed_at.
+-- The 1.0.7 cron records the moment it starts and only sends notices created
+-- after that, so deploying it cannot repeat pushes that already went out.
+create table if not exists public.lock_push_cursor (
+  id text primary key,
+  push_after timestamptz not null
+);
+
+comment on table public.lock_push_cursor is
+  'The first 1.0.7 lock run records when it may start sending pushes. Notices created earlier were already sent by the previous cron.';
+
+alter table public.lock_push_cursor enable row level security;
+revoke all on table public.lock_push_cursor from public, anon, authenticated;
+grant select, insert, update on table public.lock_push_cursor to service_role;
+
 -- Moving kickoff later (or widening the lock hours) can push an authorised
 -- hold past Stripe's seven-day window. Release it back to a saved card.
 -- The lock cron cancels the detached PaymentIntent and places a new hold
