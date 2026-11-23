@@ -11,13 +11,14 @@
 import { timingSafeEqual } from '../_shared/crypto.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import {
-  cancelUncapturedPayments,
-  confirmSucceededPendingJoins,
   placeDueOffSessionHolds,
-  refundCapturedOrCancel,
+  releaseExpiredPayment,
+  releaseOutstandingCancelledGame,
   settleLocksBeforeSql,
+  settlePendingJoinsBeforeExpiry,
+  sweepCancelledGameRefunds,
 } from '../_shared/lock-runner.ts';
-import { getStripe, payoutDueTreasurerGames, refundSucceededPayments } from '../_shared/stripe.ts';
+import { getStripe, payoutDueTreasurerGames } from '../_shared/stripe.ts';
 import { createServiceClient, withJwtSkewRetry } from '../_shared/supabase.ts';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
@@ -98,7 +99,7 @@ Deno.serve(async (req) => {
     try {
       // A 1.0.6 charge can succeed before the webhook lands. Confirm it before
       // expire_pending_joins deletes the row and leaves the capture orphaned.
-      await confirmSucceededPendingJoins(serviceClient, stripe);
+      await settlePendingJoinsBeforeExpiry(serviceClient, stripe);
     } catch (confirmError) {
       console.error('[apply-game-lock] confirm succeeded joins failed', confirmError);
       await captureEdgeError('apply-game-lock', confirmError);
@@ -113,31 +114,10 @@ Deno.serve(async (req) => {
     await captureEdgeError('apply-game-lock', expireError);
   } else if (stripe) {
     const expiredRows = (expired ?? []) as { payment_intent_id: string | null }[];
-    const intentIds = expiredRows.map((row) => row.payment_intent_id).filter((id): id is string => !!id);
-    const pitchByIntent = new Map<string, number | null>();
-    if (intentIds.length > 0) {
-      const { data: payments, error: paymentsError } = await serviceClient
-        .from('game_payments')
-        .select('stripe_payment_intent_id, pitch_cents')
-        .in('stripe_payment_intent_id', intentIds);
-      if (paymentsError) {
-        console.error('[apply-game-lock] expired payment lookup failed', paymentsError);
-        await captureEdgeError('apply-game-lock', paymentsError);
-      } else {
-        for (const payment of (payments ?? []) as { stripe_payment_intent_id: string | null; pitch_cents: number | null }[]) {
-          if (payment.stripe_payment_intent_id) pitchByIntent.set(payment.stripe_payment_intent_id, payment.pitch_cents);
-        }
-      }
-    }
     for (const row of expiredRows) {
       if (!row.payment_intent_id) continue;
       try {
-        await refundCapturedOrCancel(
-          stripe,
-          serviceClient,
-          row.payment_intent_id,
-          pitchByIntent.get(row.payment_intent_id) ?? null,
-        );
+        await releaseExpiredPayment(stripe, serviceClient, row.payment_intent_id);
       } catch (cancelError) {
         console.error('[apply-game-lock] release expired PaymentIntent failed', cancelError);
         await captureEdgeError('apply-game-lock', cancelError);
@@ -155,12 +135,32 @@ Deno.serve(async (req) => {
     }
   }
 
+  if (stripe) {
+    try {
+      // apply_game_lock_window expires pending rows again. Seat anything that
+      // succeeded while the hold sweep was running so that second expiry
+      // does not delete a paid player.
+      await settlePendingJoinsBeforeExpiry(serviceClient, stripe);
+    } catch (confirmError) {
+      console.error('[apply-game-lock] confirm succeeded joins failed', confirmError);
+      await captureEdgeError('apply-game-lock', confirmError);
+    }
+  }
+
   const { data: processed, error: lockError } = await withJwtSkewRetry(() =>
     serviceClient.rpc('apply_game_lock_window'),
   );
   if (lockError) {
     console.error('[apply-game-lock] apply_game_lock_window failed', lockError);
     await captureEdgeError('apply-game-lock', lockError);
+    if (stripe) {
+      try {
+        await sweepCancelledGameRefunds(serviceClient, stripe);
+      } catch (sweepError) {
+        console.error('[apply-game-lock] cancelled-game refund sweep failed', sweepError);
+        await captureEdgeError('apply-game-lock', sweepError);
+      }
+    }
     return jsonResponse({ ok: false, error: 'Could not apply game lock window' }, 500);
   }
 
@@ -171,12 +171,17 @@ Deno.serve(async (req) => {
     for (const row of lockRows) {
       if (row.action !== 'cancelled') continue;
       try {
-        await refundSucceededPayments(serviceClient, stripe, row.game_id);
-        await cancelUncapturedPayments(serviceClient, stripe, row.game_id);
+        await releaseOutstandingCancelledGame(serviceClient, stripe, row.game_id);
       } catch (refundError) {
         console.error('[apply-game-lock] refund after cancel failed', refundError);
         await captureEdgeError('apply-game-lock', refundError);
       }
+    }
+    try {
+      await sweepCancelledGameRefunds(serviceClient, stripe);
+    } catch (sweepError) {
+      console.error('[apply-game-lock] cancelled-game refund sweep failed', sweepError);
+      await captureEdgeError('apply-game-lock', sweepError);
     }
     try {
       await payoutDueTreasurerGames(serviceClient, stripe);

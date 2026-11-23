@@ -2,7 +2,7 @@
 // The webhook stays the backstop. Both paths call the same RPCs.
 
 import { paymentIntentChargeId } from '../_shared/join-payment-flow.ts';
-import { confirmPaidJoin } from '../_shared/lock-runner.ts';
+import { authorizeJoin, confirmPaidJoin } from '../_shared/lock-runner.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import { getStripe, jsonResponse, requireUserId } from '../_shared/stripe.ts';
@@ -43,23 +43,15 @@ Deno.serve(async (req) => {
         expand: ['latest_charge'],
       });
       if (intent.status === 'requires_capture') {
-        const method = intent.payment_method;
-        const methodId = typeof method === 'string' ? method : method?.id ?? null;
-        const charge = intent.latest_charge;
-        const card = charge && typeof charge !== 'string' ? charge.payment_method_details?.card : null;
-        const captureBefore = card && 'capture_before' in card && typeof card.capture_before === 'number'
-          ? new Date(card.capture_before * 1000).toISOString()
-          : null;
-        await service.rpc('mark_join_authorized', {
-          p_payment_intent_id: intent.id,
-          p_payment_method_id: methodId,
-          p_capture_before: captureBefore,
-        });
+        const result = await authorizeJoin(service, stripe, intent);
+        if (result === 'canceled') {
+          return jsonResponse({ ok: false, error: "Couldn't keep your spot" }, 409);
+        }
         return jsonResponse({ ok: true, status: 'authorized' });
       }
       if (intent.status === 'succeeded') {
         // Same RPC as the webhook. Covers an immediate capture and a captured hold.
-        const result = await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
+        const result = await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
         return jsonResponse({ ok: true, status: result === 'skipped_refunded' ? 'refunded' : 'paid' });
       }
     }

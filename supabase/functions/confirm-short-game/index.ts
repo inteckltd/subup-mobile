@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
       if (player.payment_status === 'paid' || !player.stripe_payment_intent_id) continue;
       const intent = await stripe.paymentIntents.retrieve(player.stripe_payment_intent_id);
       if (intent.status !== 'succeeded') continue;
-      const result = await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
+      const result = await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
       if (result === 'confirmed') player.payment_status = 'paid';
     }
 
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
           }, 400);
         }
         if (intent.status === 'succeeded') {
-          await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
+          await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
           continue;
         }
         if (intent.status !== 'requires_capture') {
@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
           {},
           { idempotencyKey: `capture:${intent.id}` },
         );
-        await confirmPaidJoin(service, captured.id, paymentIntentChargeId(captured.latest_charge));
+        await confirmPaidJoin(service, stripe, captured.id, paymentIntentChargeId(captured.latest_charge));
       } catch (captureError) {
         console.error('[confirm-short-game] capture failed', player.id, captureError);
         await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: 'declined' });

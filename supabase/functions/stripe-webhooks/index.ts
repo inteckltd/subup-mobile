@@ -2,7 +2,7 @@
 
 import Stripe from 'npm:stripe@17.7.0';
 
-import { confirmPaidJoin } from '../_shared/lock-runner.ts';
+import { authorizeJoin, confirmPaidJoin, noteJoinPaymentFailed } from '../_shared/lock-runner.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import { accountTransfersEnabled, getStripe } from '../_shared/stripe.ts';
@@ -34,8 +34,9 @@ Deno.serve(async (req) => {
 
   const rawBody = await req.text();
   let event: Stripe.Event;
+  let stripe: Stripe;
   try {
-    const stripe = getStripe();
+    stripe = getStripe();
     event = await stripe.webhooks.constructEventAsync(rawBody, signature, secret);
   } catch (error) {
     console.error('[stripe-webhooks] signature failed', error);
@@ -50,7 +51,7 @@ Deno.serve(async (req) => {
         // Immediate-capture (1.0.6) and a later hold capture both land here.
         // A refunded row stays refunded: the PaymentIntent status is still succeeded.
         const intent = event.data.object as Stripe.PaymentIntent;
-        await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
+        await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
         break;
       }
       case 'payment_intent.amount_capturable_updated': {
@@ -58,13 +59,7 @@ Deno.serve(async (req) => {
         // Automatic capture never authorises a hold. Ignore it so a 1.0.6
         // charge cannot be stored as payment_status 'authorized'.
         if (intent.capture_method === 'manual' && intent.status === 'requires_capture' && intent.amount_capturable > 0) {
-          const method = intent.payment_method;
-          const methodId = typeof method === 'string' ? method : method?.id ?? null;
-          await service.rpc('mark_join_authorized', {
-            p_payment_intent_id: intent.id,
-            p_payment_method_id: methodId,
-            p_capture_before: null,
-          });
+          await authorizeJoin(service, stripe, intent);
         }
         break;
       }
@@ -83,11 +78,11 @@ Deno.serve(async (req) => {
         break;
       }
       case 'payment_intent.payment_failed': {
+        // The sheet stays open and the PaymentIntent returns to
+        // requires_payment_method. Record the decline and keep the spot so
+        // the next card can succeed. Expiry drops the row if they leave.
         const intent = event.data.object as Stripe.PaymentIntent;
-        await service.rpc('release_pending_join', {
-          p_payment_intent_id: intent.id,
-          p_status: 'failed',
-        });
+        await noteJoinPaymentFailed(service, intent.id);
         break;
       }
       case 'payment_intent.canceled': {
