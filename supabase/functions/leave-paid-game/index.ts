@@ -117,6 +117,18 @@ Deno.serve(async (req) => {
     const anon = createAnonClient(req);
     const { data: promotedUserId, error: leaveError } = await anon.rpc('leave_game', { p_game_id: gameId });
     if (leaveError) {
+      if (paymentIntentId) {
+        const { error: restoreError } = await service
+          .from('game_players')
+          .update({
+            stripe_payment_intent_id: paymentIntentId,
+            payment_status: player.payment_status,
+          })
+          .eq('id', player.id);
+        if (restoreError) {
+          console.error('[leave-paid-game] could not restore payment row', restoreError);
+        }
+      }
       const message = leaveError.message ?? '';
       if (/haven't joined|can't leave within|Game not found|Refund the payment/i.test(message)) {
         return jsonResponse({ ok: false, error: message }, 400);

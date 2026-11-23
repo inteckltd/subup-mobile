@@ -327,7 +327,7 @@ async function confirmCapturedIntent(
  * first idempotency key then replays that error for 24 hours, so the genuine
  * retry uses a second key.
  */
-async function captureOne(
+export async function captureOne(
   stripe: Stripe,
   service: SupabaseClient,
   paymentIntentId: string,
@@ -599,20 +599,38 @@ export async function cancelUndecidedShortGames(service: SupabaseClient): Promis
   return cancelled;
 }
 
+const DETACH_RECHECK_MS = 6 * 60 * 60 * 1000;
+
+async function stampDetachRecheck(service: SupabaseClient, paymentId: string, nowMs: number): Promise<void> {
+  const { error } = await service
+    .from('game_payments')
+    .update({ next_detach_check_at: new Date(nowMs + DETACH_RECHECK_MS).toISOString() })
+    .eq('id', paymentId);
+  if (error) throw error;
+}
+
 /**
  * A kickoff move releases a hold in the database before Stripe is told.
- * Cancel those PaymentIntents once no player still points at them.
+ * Try to seat a late checkout before cancelling it. A charge that is still
+ * processing is left alone and not re-read on every cron tick.
  */
 export async function cancelDetachedHolds(service: SupabaseClient, stripe: Stripe): Promise<number> {
   const { data, error } = await service
     .from('game_payments')
-    .select('id, stripe_payment_intent_id')
+    .select('id, stripe_payment_intent_id, next_detach_check_at')
     .in('status', ['requires_capture', 'requires_payment'])
     .not('stripe_payment_intent_id', 'is', null);
   if (error) throw error;
   let cancelled = 0;
-  for (const row of (data ?? []) as { id: string; stripe_payment_intent_id: string | null }[]) {
+  const now = Date.now();
+  for (const row of (data ?? []) as {
+    id: string;
+    stripe_payment_intent_id: string | null;
+    next_detach_check_at: string | null;
+  }[]) {
     if (!row.stripe_payment_intent_id) continue;
+    const waitUntil = row.next_detach_check_at ? Date.parse(row.next_detach_check_at) : Number.NaN;
+    if (Number.isFinite(waitUntil) && waitUntil > now) continue;
     const { data: player, error: playerError } = await service
       .from('game_players')
       .select('id')
@@ -622,7 +640,23 @@ export async function cancelDetachedHolds(service: SupabaseClient, stripe: Strip
     if (player) continue;
     try {
       const intent = await stripe.paymentIntents.retrieve(row.stripe_payment_intent_id);
-      if (intent.status === 'succeeded' || intent.status === 'processing') continue;
+      if (intent.status === 'succeeded') {
+        await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
+        continue;
+      }
+      if (intent.status === 'processing') {
+        await stampDetachRecheck(service, row.id, now);
+        continue;
+      }
+      if (intent.status === 'requires_capture') {
+        const { data: restored, error: restoreError } = await service.rpc('restore_orphaned_join', {
+          p_payment_intent_id: intent.id,
+          p_outcome: 'authorized',
+          p_payment_method_id: paymentMethodId(intent),
+        });
+        if (restoreError) throw restoreError;
+        if (restored === 'restored' || restored === 'already_live') continue;
+      }
       if (intent.status !== 'canceled') await stripe.paymentIntents.cancel(intent.id);
       const { error: markError } = await service
         .from('game_payments')
@@ -632,6 +666,11 @@ export async function cancelDetachedHolds(service: SupabaseClient, stripe: Strip
       cancelled += 1;
     } catch (cancelError) {
       console.error('[lock] detach hold cancel failed', row.stripe_payment_intent_id, cancelError);
+      try {
+        await stampDetachRecheck(service, row.id, now);
+      } catch (stampError) {
+        console.error('[lock] detach recheck stamp failed', row.stripe_payment_intent_id, stampError);
+      }
     }
   }
   return cancelled;
@@ -682,27 +721,36 @@ type PushRow = {
   body: string | null;
   data: Record<string, unknown> | null;
   pushed_at: string | null;
+  created_at?: string | null;
 };
+
+const PUSH_LOOKBACK_MS = 6 * 60 * 60 * 1000;
+const PUSH_CLAIM_CAP = 25;
 
 /**
  * Stamp pushed_at while it is still null and return only the rows this run
- * claimed. A second cron tick in the same 15 minutes gets nothing.
+ * claimed. A cron outage of a few hours still delivers the push. Each run
+ * sends at most 25, oldest first, so the rest wait for the next tick.
  */
 export async function claimLockNotificationPushes(
   service: SupabaseClient,
   gameIds: string[],
   nowMs = Date.now(),
 ): Promise<PushRow[]> {
-  const since = new Date(nowMs - 15 * 60 * 1000).toISOString();
+  const since = new Date(nowMs - PUSH_LOOKBACK_MS).toISOString();
   const { data, error } = await service
     .from('notifications')
-    .select('id, user_id, title, body, data, pushed_at')
+    .select('id, user_id, title, body, data, pushed_at, created_at')
     .gte('created_at', since)
     .is('pushed_at', null);
   if (error) throw error;
+  const rows = ((data ?? []) as PushRow[])
+    .slice()
+    .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
   const claimed: PushRow[] = [];
   const stampedAt = new Date(nowMs).toISOString();
-  for (const row of (data ?? []) as PushRow[]) {
+  for (const row of rows) {
+    if (claimed.length >= PUSH_CLAIM_CAP) break;
     const type = typeof row.data?.type === 'string' ? row.data.type : null;
     const gameId = typeof row.data?.gameId === 'string' ? row.data.gameId : null;
     if (!lockNotificationShouldPush({ type, pushedAt: row.pushed_at, gameId, gameIds })) continue;
@@ -911,13 +959,15 @@ export async function releaseUserUpcomingPayments(
 ): Promise<void> {
   const { data, error } = await service
     .from('game_payments')
-    .select('stripe_payment_intent_id, pitch_cents, status, game_id')
+    .select('id, stripe_payment_intent_id, pitch_cents, status, game_id')
     .eq('user_id', userId)
-    .in('status', ['succeeded', 'requires_payment', 'requires_capture']);
+    .in('status', ['succeeded', 'requires_payment', 'requires_capture', 'card_saved']);
   if (error) throw error;
   const payments = (data ?? []) as {
+    id: string;
     stripe_payment_intent_id: string | null;
     pitch_cents: number | null;
+    status: string;
     game_id: string;
   }[];
   const gameIds = [...new Set(payments.map((payment) => payment.game_id))];
@@ -934,7 +984,6 @@ export async function releaseUserUpcomingPayments(
   );
   const now = Date.now();
   for (const payment of payments) {
-    if (!payment.stripe_payment_intent_id) continue;
     const game = byId.get(payment.game_id);
     if (!game) continue;
     if (!shouldReleasePaymentOnAccountDeletion({
@@ -944,21 +993,68 @@ export async function releaseUserUpcomingPayments(
     }, now)) {
       continue;
     }
+    // The SetupIntent already succeeded. Expiring the row is enough; there
+    // is no hold to cancel, and a saved card must not block deleting the
+    // Customer.
+    if (payment.status === 'card_saved') {
+      const { error: expireError } = await service
+        .from('game_payments')
+        .update({ status: 'expired' })
+        .eq('id', payment.id)
+        .eq('status', 'card_saved');
+      if (expireError) throw expireError;
+      continue;
+    }
+    if (!payment.stripe_payment_intent_id) continue;
     await refundCapturedOrCancel(stripe, service, payment.stripe_payment_intent_id, payment.pitch_cents);
   }
 }
 
+const FINAL_PAYMENT_INTENT = new Set(['succeeded', 'canceled']);
+const CANCELLABLE_PAYMENT_INTENT = new Set([
+  'requires_payment_method',
+  'requires_confirmation',
+  'requires_action',
+]);
+const FINAL_SETUP_INTENT = new Set(['succeeded', 'canceled']);
+
+type ListedIntent = { id: string; status?: string };
+
+async function listCustomerIntents(
+  list: (params: { customer: string; limit: number; starting_after?: string }) => Promise<{
+    data: ListedIntent[];
+    has_more: boolean;
+  }>,
+  customerId: string,
+): Promise<ListedIntent[]> {
+  const all: ListedIntent[] = [];
+  let startingAfter: string | undefined;
+  for (let page = 0; page < 20; page += 1) {
+    const result = await list({
+      customer: customerId,
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    all.push(...(result.data ?? []));
+    if (!result.has_more || result.data.length === 0) break;
+    startingAfter = result.data[result.data.length - 1]?.id;
+    if (!startingAfter) break;
+  }
+  return all;
+}
+
 /**
- * Delete the platform Customer, which also detaches saved cards.
- * Skip it when a hold, an uncaptured PaymentIntent, or a SetupIntent is
- * still open. A missing Customer is already gone. Any other Stripe error
- * is reported and does not stop account deletion.
+ * Read the saved Customer and ask Stripe what is still open. Dead intents
+ * are cancelled here. A processing charge or a live hold means the Customer
+ * must stay. The caller deletes the auth user first, then calls
+ * deleteSavedStripeCustomer. Do not delete the stripe_customers row: the
+ * create idempotency key would hand back this Customer for 24 hours.
  */
-export async function deleteSavedStripeCustomer(
+export async function prepareStripeCustomerDeletion(
   service: SupabaseClient,
   stripe: Stripe,
   userId: string,
-): Promise<'deleted' | 'already_gone' | 'left_open' | 'failed'> {
+): Promise<{ customerId: string | null; ready: boolean }> {
   const { data, error } = await service
     .from('stripe_customers')
     .select('stripe_customer_id')
@@ -966,14 +1062,69 @@ export async function deleteSavedStripeCustomer(
     .maybeSingle();
   if (error) throw error;
   const customerId = (data as { stripe_customer_id?: string | null } | null)?.stripe_customer_id ?? null;
-  if (!customerId) return 'already_gone';
+  if (!customerId) return { customerId: null, ready: false };
 
-  const openIds = await openStripeCustomerUses(service, userId);
-  if (openIds.length > 0) {
-    await alertStripeCustomerKept(userId, customerId, openIds);
-    return 'left_open';
+  let payments: ListedIntent[];
+  let setups: ListedIntent[];
+  try {
+    payments = await listCustomerIntents(
+      (params) => stripe.paymentIntents.list(params),
+      customerId,
+    );
+    setups = await listCustomerIntents(
+      (params) => stripe.setupIntents.list(params),
+      customerId,
+    );
+  } catch (listError) {
+    await alertStripeCustomerKept(userId, customerId, [stripeCode(listError) || 'stripe_list_error']);
+    return { customerId, ready: false };
   }
 
+  const stillOpen: string[] = [];
+  for (const intent of payments) {
+    const status = intent.status ?? '';
+    if (FINAL_PAYMENT_INTENT.has(status)) continue;
+    if (CANCELLABLE_PAYMENT_INTENT.has(status)) {
+      try {
+        await stripe.paymentIntents.cancel(intent.id);
+        continue;
+      } catch {
+        stillOpen.push(intent.id);
+        continue;
+      }
+    }
+    stillOpen.push(intent.id);
+  }
+  for (const setup of setups) {
+    const status = setup.status ?? '';
+    if (FINAL_SETUP_INTENT.has(status)) continue;
+    if (status === 'processing') {
+      stillOpen.push(setup.id);
+      continue;
+    }
+    try {
+      await stripe.setupIntents.cancel(setup.id);
+    } catch {
+      stillOpen.push(setup.id);
+    }
+  }
+  if (stillOpen.length > 0) {
+    await alertStripeCustomerKept(userId, customerId, stillOpen);
+    return { customerId, ready: false };
+  }
+  return { customerId, ready: true };
+}
+
+/**
+ * Delete the platform Customer after the auth user is gone. A missing
+ * Customer is already gone and is not an alert. Any other Stripe error is
+ * reported and does not undo the account deletion.
+ */
+export async function deleteSavedStripeCustomer(
+  stripe: Stripe,
+  customerId: string,
+  userId: string,
+): Promise<'deleted' | 'already_gone' | 'failed'> {
   try {
     await stripe.customers.del(customerId);
     return 'deleted';
@@ -982,41 +1133,6 @@ export async function deleteSavedStripeCustomer(
     await alertStripeCustomerKept(userId, customerId, [stripeCode(deleteError) || 'stripe_error']);
     return 'failed';
   }
-}
-
-async function openStripeCustomerUses(service: SupabaseClient, userId: string): Promise<string[]> {
-  const ids: string[] = [];
-  const { data: holds, error: holdError } = await service
-    .from('game_players')
-    .select('id, stripe_payment_intent_id')
-    .eq('user_id', userId)
-    .eq('payment_status', 'authorized');
-  if (holdError) throw holdError;
-  for (const row of (holds ?? []) as { id: string; stripe_payment_intent_id: string | null }[]) {
-    ids.push(row.stripe_payment_intent_id ?? row.id);
-  }
-
-  const { data: uncaptured, error: uncapturedError } = await service
-    .from('game_payments')
-    .select('id, stripe_payment_intent_id')
-    .eq('user_id', userId)
-    .eq('status', 'requires_capture');
-  if (uncapturedError) throw uncapturedError;
-  for (const row of (uncaptured ?? []) as { id: string; stripe_payment_intent_id: string | null }[]) {
-    ids.push(row.stripe_payment_intent_id ?? row.id);
-  }
-
-  const { data: setups, error: setupError } = await service
-    .from('game_payments')
-    .select('id, stripe_setup_intent_id')
-    .eq('user_id', userId)
-    .in('status', ['requires_payment', 'card_saved'])
-    .not('stripe_setup_intent_id', 'is', null);
-  if (setupError) throw setupError;
-  for (const row of (setups ?? []) as { id: string; stripe_setup_intent_id: string | null }[]) {
-    if (row.stripe_setup_intent_id) ids.push(row.stripe_setup_intent_id);
-  }
-  return ids;
 }
 
 async function alertStripeCustomerKept(userId: string, customerId: string, openIds: string[]): Promise<void> {
@@ -1142,6 +1258,15 @@ async function markSpotMissed(
   if (promoteError) throw promoteError;
 }
 
+async function clearPendingSpotNotice(service: SupabaseClient, paymentIntentId: string): Promise<void> {
+  const { error } = await service
+    .from('game_payments')
+    .update({ spot_refund_notice: null })
+    .eq('stripe_payment_intent_id', paymentIntentId)
+    .in('spot_refund_notice', ['refunded', 'hold_canceled']);
+  if (error) throw error;
+}
+
 /**
  * One in-app notice, pushed by the lock cron to anyone with a push token.
  * Claiming the pending notice is the dedupe: a webhook retry or the sweep
@@ -1174,6 +1299,16 @@ async function notifySpotMissed(service: SupabaseClient, paymentIntentId: string
   const gameRow = game as { status?: string; group_id?: string | null } | null;
   if (gameRow?.status !== 'open' && gameRow?.status !== 'full') return;
 
+  const { data: seats, error: seatError } = await service
+    .from('game_players')
+    .select('id')
+    .eq('game_id', row.game_id)
+    .eq('user_id', row.user_id)
+    .eq('is_waitlisted', false)
+    .neq('payment_status', 'refunded');
+  if (seatError) throw seatError;
+  const stillIn = Array.isArray(seats) && seats.length > 0;
+
   const sent = outcome === 'hold_canceled' ? 'sent_hold_canceled' : 'sent_refunded';
   const { data: claimed, error: claimError } = await service
     .from('game_payments')
@@ -1187,14 +1322,18 @@ async function notifySpotMissed(service: SupabaseClient, paymentIntentId: string
   const { error: insertError } = await service.from('notifications').insert({
     user_id: row.user_id,
     type: 'payment',
-    title: 'Game was full',
-    body: outcome === 'hold_canceled'
-      ? "Sorry, the spot went before your payment finished, so your card won't be charged."
-      : "Sorry, the spot went before your payment finished, so we've refunded you in full.",
+    title: stillIn ? 'Duplicate payment refunded' : "We couldn't keep your spot",
+    body: stillIn
+      ? (outcome === 'hold_canceled'
+        ? "You were already in this game, so your card won't be charged."
+        : "You were already in this game, so we've refunded the extra payment.")
+      : (outcome === 'hold_canceled'
+        ? "The spot went before your payment finished, so your card won't be charged."
+        : "The spot went before your payment finished, so we've refunded you in full."),
     data: {
       gameId: row.game_id,
       groupId: gameRow.group_id ?? null,
-      type: 'spot_refunded',
+      type: stillIn ? 'duplicate_refunded' : 'spot_refunded',
     },
   });
   if (insertError) {
@@ -1244,6 +1383,7 @@ async function healMissingPlayer(
       paymentIntentChargeId(intent.latest_charge),
       source,
     );
+    if (seated === 'confirmed') await clearPendingSpotNotice(service, paymentIntentId);
     return seated === 'confirmed' ? 'restored' : 'refunded';
   }
 
@@ -1265,6 +1405,9 @@ async function healMissingPlayer(
         source,
         new Error(`Not healing PaymentIntent ${paymentIntentId}: metadata is not a matching SubUp join`),
       );
+    }
+    if (restoreResult === 'restored' || restoreResult === 'already_live') {
+      await clearPendingSpotNotice(service, paymentIntentId);
     }
     if (restoreResult === 'refunded' || restoreResult === 'unwound') {
       await notifySpotMissed(service, paymentIntentId);

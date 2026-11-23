@@ -184,6 +184,14 @@ export async function startConnectOnboarding(): Promise<{ url?: string; error?: 
   return { url: data.url as string };
 }
 
+function paymentSyncNeedsRetry(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const name = 'name' in error ? String((error as { name: unknown }).name) : '';
+  if (name === 'FunctionsFetchError') return true;
+  const message = 'message' in error ? String((error as { message: unknown }).message) : '';
+  return /network request failed|failed to fetch|network error/i.test(message);
+}
+
 export async function payToJoinGame(gameId: string): Promise<{ error?: string }> {
   const { data, error } = await supabase.functions.invoke('create-join-payment', { body: joinPaymentRequest(gameId) });
   if (error || data?.ok === false) {
@@ -220,6 +228,9 @@ export async function payToJoinGame(gameId: string): Promise<{ error?: string }>
   }
 
   const synced = await supabase.functions.invoke('sync-join-payment', { body: { gameId } });
+  if (paymentSyncNeedsRetry(synced.error)) {
+    return { error: "We're still checking your payment. Open the game in a moment to see if you're in." };
+  }
   if (synced.error || synced.data?.ok === false) {
     return { error: synced.data?.error ?? "Couldn't keep your spot. You are not in this game." };
   }

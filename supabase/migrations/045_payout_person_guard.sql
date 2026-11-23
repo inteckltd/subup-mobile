@@ -1,0 +1,200 @@
+-- A group pays pitch money to groups.payout_user_id, and that column
+-- refuses to delete the person (024). Account deletion, leaving, and
+-- removing a member used to fail only after refunds and memberships were
+-- already gone, or to succeed and keep paying someone who had left.
+-- Stop before any of that when the person still receives payments for a
+-- group that has other members. Never pick a replacement here: an admin
+-- moves payouts from the group's payouts screen (set_group_payout_user).
+-- A group with nobody else left is deleted by the existing path.
+--
+-- Apply on its own with apply_migration, after 044. Do not edit earlier
+-- files. Rollback:
+--   Re-apply the previous function bodies from 018 (delete_my_account),
+--   011 (leave_group) and 010 (kick_group_member). No table changes.
+
+create or replace function public.delete_my_account()
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_names text[];
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated' using errcode = '42501';
+  end if;
+
+  select array_agg(g.name order by g.name)
+  into v_names
+  from public.groups g
+  join public.group_members me on me.group_id = g.id and me.user_id = auth.uid()
+  where me.role = 'admin'
+    and not exists (
+      select 1 from public.group_members other
+      where other.group_id = g.id and other.role = 'admin' and other.user_id <> auth.uid()
+    );
+
+  if v_names is not null then
+    raise exception 'Promote another admin in % before deleting your account.', array_to_string(v_names, ', ');
+  end if;
+
+  select array_agg(g.name order by g.name)
+  into v_names
+  from public.groups g
+  where g.payout_user_id = auth.uid()
+    and exists (
+      select 1 from public.group_members other
+      where other.group_id = g.id and other.user_id <> auth.uid()
+    );
+
+  if v_names is not null and cardinality(v_names) = 1 then
+    raise exception '%', format(
+      'You receive this group''s payments. Move payouts to another admin in %s before deleting your account.',
+      v_names[1]
+    );
+  end if;
+
+  if v_names is not null then
+    raise exception '%', format(
+      'You receive payments for %s. Move payouts to another admin in those groups before deleting your account.',
+      array_to_string(v_names, ', ')
+    );
+  end if;
+
+  delete from public.groups g
+  where exists (
+    select 1 from public.group_members me
+    where me.group_id = g.id and me.user_id = auth.uid()
+  )
+  and not exists (
+    select 1 from public.group_members other
+    where other.group_id = g.id and other.user_id <> auth.uid()
+  );
+
+  delete from public.group_members where user_id = auth.uid();
+
+  update public.group_invites
+  set status = 'cancelled', responded_at = now()
+  where invitee_id = auth.uid() and status = 'pending';
+
+  delete from public.game_players gp
+  using public.games g
+  where gp.user_id = auth.uid()
+    and gp.game_id = g.id
+    and g.status in ('open', 'full');
+
+  delete from public.push_tokens where user_id = auth.uid();
+  delete from public.notifications where user_id = auth.uid();
+end;
+$$;
+
+comment on function public.delete_my_account() is
+  'Caller leaves groups they do not solely administer, cancels invites, drops upcoming open/full spots, and removes push tokens and notifications. The client then deletes Storage files and the auth user. Refuses while they are the only admin, or still receive payouts, for a group that has other members.';
+
+revoke all on function public.delete_my_account() from public;
+grant execute on function public.delete_my_account() to authenticated;
+
+create or replace function public.leave_group(p_group_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_name text;
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated' using errcode = '42501';
+  end if;
+
+  if not exists (
+    select 1 from public.group_members
+    where group_id = p_group_id and user_id = auth.uid()
+  ) then
+    raise exception 'You are not a member of this group';
+  end if;
+
+  -- The sentence starts with the wording the live 1.0.6 app already shows
+  -- in full. The rest tells them where to move payouts.
+  select g.name into v_name
+  from public.groups g
+  where g.id = p_group_id
+    and g.payout_user_id = auth.uid()
+    and exists (
+      select 1 from public.group_members other
+      where other.group_id = g.id and other.user_id <> auth.uid()
+    );
+
+  if v_name is not null then
+    raise exception '%', format(
+      'Promote another admin before leaving or removing the last admin. You receive this group''s payments. Move payouts to another admin in %s before leaving.',
+      v_name
+    );
+  end if;
+
+  delete from public.group_members
+  where group_id = p_group_id and user_id = auth.uid();
+
+  if not exists (select 1 from public.group_members where group_id = p_group_id) then
+    delete from public.groups where id = p_group_id;
+  end if;
+end;
+$$;
+
+comment on function public.leave_group(uuid) is
+  'Caller leaves the group. The last remaining member may leave; the empty group is then deleted. Refuses while the caller still receives the group''s payouts and other members remain.';
+
+revoke all on function public.leave_group(uuid) from public;
+grant execute on function public.leave_group(uuid) to authenticated;
+
+create or replace function public.kick_group_member(p_group_id uuid, p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_name text;
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated' using errcode = '42501';
+  end if;
+
+  if not exists (
+    select 1 from public.group_members
+    where group_id = p_group_id and user_id = auth.uid() and role = 'admin'
+  ) then
+    raise exception 'Only an admin can remove members';
+  end if;
+
+  if p_user_id = auth.uid() then
+    raise exception 'Use leave to remove yourself';
+  end if;
+
+  select g.name into v_name
+  from public.groups g
+  where g.id = p_group_id
+    and g.payout_user_id = p_user_id
+    and exists (
+      select 1 from public.group_members other
+      where other.group_id = g.id and other.user_id <> p_user_id
+    );
+
+  if v_name is not null then
+    raise exception '%', format(
+      'Promote another admin before leaving or removing the last admin. They receive this group''s payments. Move payouts to another admin in %s before removing them.',
+      v_name
+    );
+  end if;
+
+  delete from public.group_members
+  where group_id = p_group_id and user_id = p_user_id;
+end;
+$$;
+
+comment on function public.kick_group_member(uuid, uuid) is
+  'Admin removes another member. Refuses while that member still receives the group''s payouts.';
+
+revoke all on function public.kick_group_member(uuid, uuid) from public;
+grant execute on function public.kick_group_member(uuid, uuid) to authenticated;
