@@ -1,6 +1,8 @@
 // After PaymentSheet, mark the hold or saved card without waiting on the webhook.
 // The webhook stays the backstop. Both paths call the same RPCs.
 
+import { paymentIntentChargeId } from '../_shared/join-payment-flow.ts';
+import { confirmPaidJoin } from '../_shared/lock-runner.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import { getStripe, jsonResponse, requireUserId } from '../_shared/stripe.ts';
@@ -56,12 +58,9 @@ Deno.serve(async (req) => {
         return jsonResponse({ ok: true, status: 'authorized' });
       }
       if (intent.status === 'succeeded') {
-        const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : intent.latest_charge?.id;
-        await service.rpc('confirm_paid_join', {
-          p_payment_intent_id: intent.id,
-          p_charge_id: chargeId ?? null,
-        });
-        return jsonResponse({ ok: true, status: 'paid' });
+        // Same RPC as the webhook. Covers an immediate capture and a captured hold.
+        const result = await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
+        return jsonResponse({ ok: true, status: result === 'skipped_refunded' ? 'refunded' : 'paid' });
       }
     }
 

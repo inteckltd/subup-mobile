@@ -63,7 +63,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "TZ=Europe/London tsx --test src/features/games/repeatGame.test.ts src/features/group-details/whosPlaying.test.ts",
+    "test": "TZ=Europe/London tsx --test src/features/games/repeatGame.test.ts src/features/group-details/whosPlaying.test.ts src/features/payments/joinPaymentRequest.test.ts",
     "eas-build-post-install": "node ./scripts/apply-meta-native-config.js"
   },
   "private": true

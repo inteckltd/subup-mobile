@@ -5,7 +5,9 @@
 import type Stripe from 'npm:stripe@17.7.0';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
+import { dispositionForStripeIntent, paymentIntentChargeId, shouldReleasePaymentOnAccountDeletion } from './join-payment-flow.ts';
 import { planAfterCaptureFailure, planAtLock, type PlayerMoney } from './lock-decision.ts';
+import { isIdempotentRefundError, refundPaymentIntent } from './stripe.ts';
 
 type DueHold = {
   game_player_id: string;
@@ -195,12 +197,8 @@ async function captureOne(
 ): Promise<'captured' | 'failed' | 'dead'> {
   const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
   if (intent.status === 'succeeded') {
-    const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : intent.latest_charge?.id;
-    await service.rpc('confirm_paid_join', {
-      p_payment_intent_id: intent.id,
-      p_charge_id: chargeId ?? null,
-    });
-    return 'captured';
+    const result = await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
+    return result === 'skipped_refunded' ? 'dead' : 'captured';
   }
   if (intent.status !== 'requires_capture') return 'dead';
   try {
@@ -209,12 +207,8 @@ async function captureOne(
       {},
       { idempotencyKey: `capture:${paymentIntentId}` },
     );
-    const chargeId = typeof captured.latest_charge === 'string' ? captured.latest_charge : captured.latest_charge?.id;
-    await service.rpc('confirm_paid_join', {
-      p_payment_intent_id: captured.id,
-      p_charge_id: chargeId ?? null,
-    });
-    return 'captured';
+    const result = await confirmPaidJoin(service, captured.id, paymentIntentChargeId(captured.latest_charge));
+    return result === 'skipped_refunded' ? 'dead' : 'captured';
   } catch (captureError) {
     console.error('[lock] capture failed', paymentIntentId, stripeCode(captureError), captureError);
     return 'failed';
@@ -246,12 +240,32 @@ export async function settleLocksBeforeSql(service: SupabaseClient, stripe: Stri
       .eq('is_waitlisted', false);
     if (rosterError) throw rosterError;
     const players = (roster ?? []) as RosterPlayer[];
+    for (const player of players) {
+      if (player.payment_status === 'paid' || !player.stripe_payment_intent_id) continue;
+      const intent = await stripe.paymentIntents.retrieve(player.stripe_payment_intent_id);
+      if (intent.status !== 'succeeded') continue;
+      const result = await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
+      if (result === 'confirmed') player.payment_status = 'paid';
+    }
 
     const initial = planAtLock({
       minPlayers: game.min_players,
       shortfallOpen: false,
       players: players.map((player) => toMoney(player.payment_status)),
     });
+    if (initial.type === 'confirm_captured') {
+      // Enough players are already charged (typical of 1.0.6 immediate capture).
+      // A saved card that never became a hold should not keep a spot off the teams.
+      for (const player of players) {
+        if (player.payment_status !== 'card_saved') continue;
+        const { error: dropError } = await service.rpc('drop_unpaid_player', {
+          p_game_player_id: player.id,
+          p_reason: 'unconfirmed',
+        });
+        if (dropError) console.error('[lock] drop saved card failed', player.id, dropError);
+      }
+      continue;
+    }
     if (initial.type !== 'capture_then_confirm') continue;
 
     const queue = players.filter(
@@ -316,17 +330,171 @@ export async function cancelUncapturedPayments(
   stripe: Stripe,
   gameId: string,
 ): Promise<void> {
-  const { data, error } = await service.rpc('list_uncaptured_game_payments', { p_game_id: gameId });
+  const { data, error } = await service
+    .from('game_payments')
+    .select('stripe_payment_intent_id, pitch_cents')
+    .eq('game_id', gameId)
+    .in('status', ['requires_payment', 'requires_capture']);
   if (error) throw error;
-  for (const row of (data ?? []) as { stripe_payment_intent_id: string }[]) {
+  for (const row of (data ?? []) as { stripe_payment_intent_id: string | null; pitch_cents: number | null }[]) {
     if (!row.stripe_payment_intent_id) continue;
     try {
-      await stripe.paymentIntents.cancel(row.stripe_payment_intent_id);
+      await refundCapturedOrCancel(stripe, service, row.stripe_payment_intent_id, row.pitch_cents);
     } catch (cancelError) {
-      const message = cancelError instanceof Error ? cancelError.message : String(cancelError);
-      if (!/canceled|cannot be canceled/i.test(message)) {
-        console.error('[lock] cancel hold failed', row.stripe_payment_intent_id, cancelError);
-      }
+      console.error('[lock] release payment failed', row.stripe_payment_intent_id, cancelError);
     }
   }
+}
+
+type PaymentRelease = 'refunded' | 'canceled' | 'none';
+
+/**
+ * Succeeded means money has moved (immediate capture, or a hold already
+ * captured). Cancel is a no-op on those, so refund the pitch instead.
+ * Refund failures throw. Cancel failures throw unless Stripe already canceled it.
+ */
+export async function refundCapturedOrCancel(
+  stripe: Stripe,
+  service: SupabaseClient,
+  paymentIntentId: string,
+  pitchCents: number | null,
+): Promise<PaymentRelease> {
+  const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  return finishIntentDisposition(stripe, service, intent, pitchCents);
+}
+
+async function finishIntentDisposition(
+  stripe: Stripe,
+  service: SupabaseClient,
+  intent: Stripe.PaymentIntent,
+  pitchCents: number | null,
+): Promise<PaymentRelease> {
+  const disposition = dispositionForStripeIntent(intent.status);
+  if (disposition === 'none') return 'none';
+  if (disposition === 'refund') {
+    if (pitchCents == null) {
+      throw new Error(`Missing pitch amount for ${intent.id}`);
+    }
+    if (pitchCents > 0) {
+      try {
+        await refundPaymentIntent(stripe, intent.id, pitchCents);
+      } catch (refundError) {
+        if (!isIdempotentRefundError(refundError)) throw refundError;
+      }
+    }
+    const { error } = await service.rpc('mark_game_payment_refunded', { p_payment_intent_id: intent.id });
+    if (error) throw error;
+    return 'refunded';
+  }
+
+  try {
+    await stripe.paymentIntents.cancel(intent.id);
+    return 'canceled';
+  } catch (cancelError) {
+    const message = cancelError instanceof Error ? cancelError.message : String(cancelError);
+    if (!/canceled|cannot be canceled/i.test(message)) throw cancelError;
+    const again = await stripe.paymentIntents.retrieve(intent.id);
+    if (again.status === 'canceled') return 'none';
+    if (again.status === 'succeeded') return finishIntentDisposition(stripe, service, again, pitchCents);
+    throw cancelError;
+  }
+}
+
+/** Mark pending rows paid when Stripe has already captured, before expiry deletes them. */
+export async function confirmSucceededPendingJoins(service: SupabaseClient, stripe: Stripe): Promise<number> {
+  const horizon = new Date(Date.now() + 6 * 60 * 1000).toISOString();
+  const { data, error } = await service
+    .from('game_players')
+    .select('stripe_payment_intent_id')
+    .eq('payment_status', 'pending')
+    .not('stripe_payment_intent_id', 'is', null)
+    .lte('pending_expires_at', horizon);
+  if (error) throw error;
+
+  let confirmed = 0;
+  for (const row of (data ?? []) as { stripe_payment_intent_id: string | null }[]) {
+    if (!row.stripe_payment_intent_id) continue;
+    try {
+      const intent = await stripe.paymentIntents.retrieve(row.stripe_payment_intent_id);
+      if (intent.status !== 'succeeded') continue;
+      const result = await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
+      if (result === 'confirmed') confirmed += 1;
+    } catch (confirmError) {
+      console.error('[lock] confirm succeeded pending join failed', row.stripe_payment_intent_id, confirmError);
+    }
+  }
+  return confirmed;
+}
+
+/**
+ * Before delete_my_account drops upcoming spots: refund captured payments and
+ * cancel holds. A 1.0.6 immediate capture is `succeeded` and must be refunded;
+ * cancelling it does not return the money.
+ */
+export async function releaseUserUpcomingPayments(
+  service: SupabaseClient,
+  stripe: Stripe,
+  userId: string,
+): Promise<void> {
+  const { data, error } = await service
+    .from('game_payments')
+    .select('stripe_payment_intent_id, pitch_cents, status, game_id')
+    .eq('user_id', userId)
+    .in('status', ['succeeded', 'requires_payment', 'requires_capture']);
+  if (error) throw error;
+  const payments = (data ?? []) as {
+    stripe_payment_intent_id: string | null;
+    pitch_cents: number | null;
+    game_id: string;
+  }[];
+  const gameIds = [...new Set(payments.map((payment) => payment.game_id))];
+  if (gameIds.length === 0) return;
+
+  const { data: games, error: gamesError } = await service
+    .from('games')
+    .select('id, status, starts_at, treasurer_payout_id')
+    .in('id', gameIds);
+  if (gamesError) throw gamesError;
+  const byId = new Map(
+    ((games ?? []) as { id: string; status: string; starts_at: string | null; treasurer_payout_id: string | null }[])
+      .map((game) => [game.id, game]),
+  );
+  const now = Date.now();
+  for (const payment of payments) {
+    if (!payment.stripe_payment_intent_id) continue;
+    const game = byId.get(payment.game_id);
+    if (!game) continue;
+    if (!shouldReleasePaymentOnAccountDeletion({
+      status: game.status,
+      startsAt: game.starts_at,
+      treasurerPayoutId: game.treasurer_payout_id,
+    }, now)) {
+      continue;
+    }
+    await refundCapturedOrCancel(stripe, service, payment.stripe_payment_intent_id, payment.pitch_cents);
+  }
+}
+
+/**
+ * payment_intent.succeeded stays succeeded after a refund. Don't let that
+ * webhook (or a late sync) flip a refunded ledger row back to paid.
+ */
+export async function confirmPaidJoin(
+  service: SupabaseClient,
+  paymentIntentId: string,
+  chargeId: string | null,
+): Promise<'confirmed' | 'skipped_refunded'> {
+  const { data, error } = await service
+    .from('game_payments')
+    .select('status')
+    .eq('stripe_payment_intent_id', paymentIntentId)
+    .maybeSingle();
+  if (error) throw error;
+  if ((data as { status?: string } | null)?.status === 'refunded') return 'skipped_refunded';
+  const { error: rpcError } = await service.rpc('confirm_paid_join', {
+    p_payment_intent_id: paymentIntentId,
+    p_charge_id: chargeId,
+  });
+  if (rpcError) throw rpcError;
+  return 'confirmed';
 }

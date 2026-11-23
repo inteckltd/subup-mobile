@@ -1,10 +1,32 @@
 // Reserve a paid spot and return a PaymentSheet secret.
-// Lock within 4 days: manual-capture PaymentIntent (bank hold, not a charge).
-// Further out: SetupIntent that saves the card. The lock cron places the hold later.
+//
+// Default — the live 1.0.6 app, which posts `{ gameId }` and nothing else:
+//   immediate-capture destination PaymentIntent, same as this function before
+//   #4 (e031dbe). Response is `{ ok, clientSecret, paymentIntentId, amountCents,
+//   feeCents, pitchCents }` with no `mode`. The player row stays `pending` and
+//   game_payments stays `requires_payment` until payment_intent.succeeded,
+//   which marks them `paid` / `succeeded`. The fee is reserve_paid_join's
+//   fee_cents (10% of the pitch, minimum 50p).
+//
+// Opt in — 1.0.7 posts `{ gameId, paymentFlow: 'hold' }`:
+//   SetupIntent when lock is more than four days away, otherwise a
+//   manual-capture PaymentIntent. `already_held` / `already_saved` /
+//   `already_paid` mean the card is already sorted and there is no secret.
+
+import type Stripe from 'npm:stripe@17.7.0';
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
-import { ensureStripeCustomer, manualHoldParams } from '../_shared/lock-runner.ts';
+import { confirmPaidJoin, ensureStripeCustomer, manualHoldParams } from '../_shared/lock-runner.ts';
+import {
+  joinPaymentFlow,
+  legacyJoinPaymentResponse,
+  legacyPaymentIntentParams,
+  paymentIntentChargeId,
+  planHoldExistingIntent,
+  planLegacyExistingIntent,
+} from '../_shared/join-payment-flow.ts';
 import { accountTransfersEnabled, createAnonClient, getStripe, jsonResponse, requireUserId } from '../_shared/stripe.ts';
 
 type ReserveRow = {
@@ -20,14 +42,26 @@ type ReserveRow = {
   payment_status: string;
 };
 
+const ALREADY_JOINED = 'You have already joined this game';
+
+function amountsOf(row: ReserveRow) {
+  return {
+    amountCents: row.total_cents,
+    feeCents: row.fee_cents,
+    pitchCents: row.pitch_cents,
+  };
+}
+
 Deno.serve(async (req) => {
   const auth = await requireUserId(req);
   if (auth instanceof Response) return auth;
 
   let gameId: string | undefined;
+  let flow: 'legacy' | 'hold' = 'legacy';
   try {
     const body = await req.json();
     gameId = body?.gameId;
+    flow = joinPaymentFlow(body);
   } catch {
     return jsonResponse({ ok: false, error: 'Invalid request body' }, 400);
   }
@@ -46,7 +80,10 @@ Deno.serve(async (req) => {
 
   const releaseReservation = async () => {
     if (!reservedPlayerId) return;
-    await service.rpc('release_pending_join_by_player', { p_game_player_id: reservedPlayerId }).catch(() => {});
+    const { error: releaseError } = await service.rpc('release_pending_join_by_player', {
+      p_game_player_id: reservedPlayerId,
+    });
+    if (releaseError) console.error('[create-join-payment] release reservation failed', releaseError);
     reservedPlayerId = null;
   };
 
@@ -71,13 +108,24 @@ Deno.serve(async (req) => {
     }
     if (row.payment_status === 'pending') reservedPlayerId = row.game_player_id;
 
+    if (flow === 'legacy') {
+      return await startLegacyPayment({
+        service,
+        row,
+        gameId,
+        userId: auth.userId,
+        releaseReservation,
+        keepReservation: () => {
+          reservedPlayerId = null;
+        },
+      });
+    }
+
     if (row.payment_status === 'authorized') {
       return jsonResponse({
         ok: true,
         mode: 'already_held',
-        amountCents: row.total_cents,
-        feeCents: row.fee_cents,
-        pitchCents: row.pitch_cents,
+        ...amountsOf(row),
         holdNow: true,
       });
     }
@@ -85,9 +133,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         ok: true,
         mode: 'already_saved',
-        amountCents: row.total_cents,
-        feeCents: row.fee_cents,
-        pitchCents: row.pitch_cents,
+        ...amountsOf(row),
         holdNow: false,
       });
     }
@@ -103,12 +149,7 @@ Deno.serve(async (req) => {
     }
 
     const customerId = await ensureStripeCustomer(stripe, service, auth.userId, row.stripe_customer_id);
-    const amounts = {
-      amountCents: row.total_cents,
-      feeCents: row.fee_cents,
-      pitchCents: row.pitch_cents,
-      holdNow: row.hold_now,
-    };
+    const amounts = { ...amountsOf(row), holdNow: row.hold_now };
 
     if (!row.hold_now) {
       let setupIntentId = row.existing_setup_intent_id;
@@ -175,17 +216,25 @@ Deno.serve(async (req) => {
     let clientSecret: string | null = null;
     if (paymentIntentId) {
       const existing = await stripe.paymentIntents.retrieve(paymentIntentId);
-      if (existing.status === 'requires_capture') {
+      const plan = planHoldExistingIntent({ status: existing.status, captureMethod: existing.capture_method });
+      if (plan === 'confirm_paid') {
+        reservedPlayerId = null;
+        const result = await confirmPaidJoin(service, existing.id, paymentIntentChargeId(existing.latest_charge));
+        if (result === 'skipped_refunded') {
+          return jsonResponse({ ok: false, error: "Couldn't start payment" }, 400);
+        }
+        return jsonResponse({ ok: true, mode: 'already_paid', paymentIntentId: existing.id, ...amounts });
+      }
+      if (plan === 'already_held') {
         reservedPlayerId = null;
         return jsonResponse({ ok: true, mode: 'already_held', paymentIntentId, ...amounts });
       }
-      if (
-        existing.status === 'requires_payment_method' ||
-        existing.status === 'requires_confirmation' ||
-        existing.status === 'requires_action'
-      ) {
+      if (plan === 'reuse') {
         clientSecret = existing.client_secret;
       } else {
+        if (isCancelableStatus(existing.status)) {
+          await stripe.paymentIntents.cancel(paymentIntentId).catch(() => {});
+        }
         paymentIntentId = null;
       }
     }
@@ -243,3 +292,154 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, error: "Couldn't start payment" }, 500);
   }
 });
+
+function isCancelableStatus(status: string): boolean {
+  return (
+    status === 'requires_payment_method' ||
+    status === 'requires_confirmation' ||
+    status === 'requires_action' ||
+    status === 'requires_capture'
+  );
+}
+
+async function startLegacyPayment(input: {
+  service: SupabaseClient;
+  row: ReserveRow;
+  gameId: string;
+  userId: string;
+  releaseReservation: () => Promise<void>;
+  keepReservation: () => void;
+}): Promise<Response> {
+  const { service, row, gameId, userId } = input;
+  // 1.0.6 deletes its own row when this call fails or omits clientSecret,
+  // but only while payment_status is still pending. A hold or saved card
+  // from 1.0.7 is already past that, so refuse a second charge.
+  if (row.payment_status === 'authorized' || row.payment_status === 'card_saved') {
+    input.keepReservation();
+    return jsonResponse({ ok: false, error: ALREADY_JOINED }, 400);
+  }
+
+  const stripe = getStripe();
+  const destination = await stripe.accounts.retrieve(row.stripe_account_id);
+  if (!accountTransfersEnabled(destination)) {
+    await input.releaseReservation();
+    return jsonResponse({
+      ok: false,
+      error: 'This group cannot take card payments yet. The organiser needs to finish Stripe payouts setup.',
+    }, 400);
+  }
+
+  let paymentIntentId = row.existing_payment_intent_id;
+  let clientSecret: string | null = null;
+
+  if (paymentIntentId) {
+    const existing = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const plan = planLegacyExistingIntent({ status: existing.status, captureMethod: existing.capture_method });
+    if (plan === 'confirm_paid') {
+      return confirmLegacyCapture(existing, row, service, input.keepReservation);
+    }
+    if (plan === 'mark_authorized') {
+      return markLegacyHold(existing, service, input.keepReservation);
+    }
+    if (plan === 'keep') {
+      input.keepReservation();
+      if (!existing.client_secret) {
+        return jsonResponse({ ok: false, error: "Couldn't start payment" }, 500);
+      }
+      return jsonResponse(legacyJoinPaymentResponse({
+        clientSecret: existing.client_secret,
+        paymentIntentId: existing.id,
+        ...amountsOf(row),
+      }));
+    }
+    if (plan === 'reuse') {
+      clientSecret = existing.client_secret;
+    } else {
+      if (existing.capture_method === 'manual' && isCancelableStatus(existing.status)) {
+        await stripe.paymentIntents.cancel(existing.id).catch(() => {});
+      }
+      paymentIntentId = null;
+    }
+  }
+
+  if (!paymentIntentId || !clientSecret) {
+    const intent = await stripe.paymentIntents.create(legacyPaymentIntentParams({
+      totalCents: row.total_cents,
+      feeCents: row.fee_cents,
+      destination: row.stripe_account_id,
+      gameId,
+      userId,
+      gamePlayerId: row.game_player_id,
+    }));
+    paymentIntentId = intent.id;
+    clientSecret = intent.client_secret;
+    const { error: attachError } = await service.rpc('attach_payment_intent', {
+      p_game_player_id: row.game_player_id,
+      p_payment_intent_id: paymentIntentId,
+      p_amount_cents: row.total_cents,
+      p_application_fee_cents: row.fee_cents,
+      p_pitch_cents: row.pitch_cents,
+    });
+    if (attachError) {
+      await stripe.paymentIntents.cancel(paymentIntentId).catch(() => {});
+      throw attachError;
+    }
+  }
+
+  input.keepReservation();
+  return jsonResponse(legacyJoinPaymentResponse({
+    clientSecret: clientSecret as string,
+    paymentIntentId,
+    ...amountsOf(row),
+  }));
+}
+
+async function confirmLegacyCapture(
+  existing: Stripe.PaymentIntent,
+  row: ReserveRow,
+  service: SupabaseClient,
+  keepReservation: () => void,
+): Promise<Response> {
+  // Stop our own error path from deleting a row whose card was already captured.
+  keepReservation();
+  try {
+    const result = await confirmPaidJoin(service, existing.id, paymentIntentChargeId(existing.latest_charge));
+    if (result === 'skipped_refunded') {
+      return jsonResponse({ ok: false, error: "Couldn't start payment" }, 400);
+    }
+  } catch (confirmError) {
+    if (existing.client_secret) {
+      return jsonResponse(legacyJoinPaymentResponse({
+        clientSecret: existing.client_secret,
+        paymentIntentId: existing.id,
+        ...amountsOf(row),
+      }));
+    }
+    throw confirmError;
+  }
+  // No clientSecret on purpose. 1.0.6 treats that as failure and calls
+  // release_my_pending_join, which only deletes a pending row. This row is
+  // paid, so the spot stays and the next screen shows them in.
+  return jsonResponse({
+    ok: true,
+    paymentIntentId: existing.id,
+    ...amountsOf(row),
+  });
+}
+
+async function markLegacyHold(
+  existing: Stripe.PaymentIntent,
+  service: SupabaseClient,
+  keepReservation: () => void,
+): Promise<Response> {
+  keepReservation();
+  const method = existing.payment_method;
+  const methodId = typeof method === 'string' ? method : method?.id ?? null;
+  const { error } = await service.rpc('mark_join_authorized', {
+    p_payment_intent_id: existing.id,
+    p_payment_method_id: methodId,
+    p_capture_before: null,
+  });
+  if (error) throw error;
+  return jsonResponse({ ok: false, error: ALREADY_JOINED }, 400);
+}

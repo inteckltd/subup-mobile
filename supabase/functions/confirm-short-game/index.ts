@@ -2,6 +2,8 @@
 // picks teams. Declines drop that player. Nothing is refunded here — cancel
 // is the other button, and it releases uncaptured holds for free.
 
+import { paymentIntentChargeId } from '../_shared/join-payment-flow.ts';
+import { confirmPaidJoin } from '../_shared/lock-runner.ts';
 import { captureEdgeError } from '../_shared/sentry.ts';
 import { createServiceClient } from '../_shared/supabase.ts';
 import { createAnonClient, getStripe, jsonResponse, requireUserId } from '../_shared/stripe.ts';
@@ -57,11 +59,20 @@ Deno.serve(async (req) => {
       .from('game_players')
       .select('id, stripe_payment_intent_id, payment_status')
       .eq('game_id', gameId)
-      .eq('is_waitlisted', false)
-      .eq('payment_status', 'authorized');
+      .eq('is_waitlisted', false);
     if (playersError) throw playersError;
 
-    for (const player of (players ?? []) as HoldRow[]) {
+    const roster = (players ?? []) as HoldRow[];
+    // A 1.0.6 charge may already have succeeded while the row is still pending.
+    for (const player of roster) {
+      if (player.payment_status === 'paid' || !player.stripe_payment_intent_id) continue;
+      const intent = await stripe.paymentIntents.retrieve(player.stripe_payment_intent_id);
+      if (intent.status !== 'succeeded') continue;
+      const result = await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
+      if (result === 'confirmed') player.payment_status = 'paid';
+    }
+
+    for (const player of roster.filter((player) => player.payment_status === 'authorized')) {
       if (!player.stripe_payment_intent_id) {
         await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: 'expired' });
         continue;
@@ -75,11 +86,7 @@ Deno.serve(async (req) => {
           }, 400);
         }
         if (intent.status === 'succeeded') {
-          const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : intent.latest_charge?.id;
-          await service.rpc('confirm_paid_join', {
-            p_payment_intent_id: intent.id,
-            p_charge_id: chargeId ?? null,
-          });
+          await confirmPaidJoin(service, intent.id, paymentIntentChargeId(intent.latest_charge));
           continue;
         }
         if (intent.status !== 'requires_capture') {
@@ -91,11 +98,7 @@ Deno.serve(async (req) => {
           {},
           { idempotencyKey: `capture:${intent.id}` },
         );
-        const chargeId = typeof captured.latest_charge === 'string' ? captured.latest_charge : captured.latest_charge?.id;
-        await service.rpc('confirm_paid_join', {
-          p_payment_intent_id: captured.id,
-          p_charge_id: chargeId ?? null,
-        });
+        await confirmPaidJoin(service, captured.id, paymentIntentChargeId(captured.latest_charge));
       } catch (captureError) {
         console.error('[confirm-short-game] capture failed', player.id, captureError);
         await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: 'declined' });
