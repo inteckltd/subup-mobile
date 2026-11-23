@@ -19,33 +19,42 @@ security definer
 set search_path = public, pg_temp
 as $$
 declare
+  v_uid uuid := auth.uid();
+  v_blocked text;
   v_names text[];
 begin
-  if auth.uid() is null then
+  if v_uid is null then
     raise exception 'Not authenticated' using errcode = '42501';
   end if;
 
-  select array_agg(g.name order by g.name)
-  into v_names
+  select string_agg(g.name, ', ' order by g.name)
+  into v_blocked
   from public.groups g
-  join public.group_members me on me.group_id = g.id and me.user_id = auth.uid()
-  where me.role = 'admin'
+  where exists (
+      select 1 from public.group_members gm
+      where gm.group_id = g.id and gm.user_id = v_uid and gm.role = 'admin'
+    )
+    and exists (
+      select 1 from public.group_members gm
+      where gm.group_id = g.id and gm.user_id <> v_uid
+    )
     and not exists (
-      select 1 from public.group_members other
-      where other.group_id = g.id and other.role = 'admin' and other.user_id <> auth.uid()
+      select 1 from public.group_members gm
+      where gm.group_id = g.id and gm.user_id <> v_uid and gm.role = 'admin'
     );
 
-  if v_names is not null then
-    raise exception 'Promote another admin in % before deleting your account.', array_to_string(v_names, ', ');
+  if v_blocked is not null then
+    raise exception 'Promote another admin in % before deleting your account.', v_blocked
+      using errcode = 'P0001';
   end if;
 
   select array_agg(g.name order by g.name)
   into v_names
   from public.groups g
-  where g.payout_user_id = auth.uid()
+  where g.payout_user_id = v_uid
     and exists (
       select 1 from public.group_members other
-      where other.group_id = g.id and other.user_id <> auth.uid()
+      where other.group_id = g.id and other.user_id <> v_uid
     );
 
   if v_names is not null and cardinality(v_names) = 1 then
@@ -62,30 +71,34 @@ begin
     );
   end if;
 
+  -- Sole-member groups: cascade games/members. prevent_last_admin_loss
+  -- allows this because no other members remain.
   delete from public.groups g
   where exists (
-    select 1 from public.group_members me
-    where me.group_id = g.id and me.user_id = auth.uid()
-  )
-  and not exists (
-    select 1 from public.group_members other
-    where other.group_id = g.id and other.user_id <> auth.uid()
-  );
+      select 1 from public.group_members gm
+      where gm.group_id = g.id and gm.user_id = v_uid
+    )
+    and not exists (
+      select 1 from public.group_members gm
+      where gm.group_id = g.id and gm.user_id <> v_uid
+    );
 
-  delete from public.group_members where user_id = auth.uid();
+  delete from public.group_members where user_id = v_uid;
 
   update public.group_invites
-  set status = 'cancelled', responded_at = now()
-  where invitee_id = auth.uid() and status = 'pending';
+  set status = 'cancelled'
+  where status = 'pending'
+    and (invited_by = v_uid or invited_user_id = v_uid);
 
   delete from public.game_players gp
   using public.games g
-  where gp.user_id = auth.uid()
-    and gp.game_id = g.id
-    and g.status in ('open', 'full');
+  where gp.game_id = g.id
+    and gp.user_id = v_uid
+    and g.status in ('open', 'full')
+    and g.starts_at > now();
 
-  delete from public.push_tokens where user_id = auth.uid();
-  delete from public.notifications where user_id = auth.uid();
+  delete from public.push_tokens where user_id = v_uid;
+  delete from public.notifications where user_id = v_uid;
 end;
 $$;
 
@@ -161,15 +174,19 @@ begin
     raise exception 'Not authenticated' using errcode = '42501';
   end if;
 
-  if not exists (
-    select 1 from public.group_members
-    where group_id = p_group_id and user_id = auth.uid() and role = 'admin'
-  ) then
-    raise exception 'Only an admin can remove members';
+  if not public.is_group_admin(p_group_id) then
+    raise exception 'Only group admins can remove members' using errcode = '42501';
   end if;
 
   if p_user_id = auth.uid() then
-    raise exception 'Use leave to remove yourself';
+    raise exception 'Use leave group to remove yourself';
+  end if;
+
+  if not exists (
+    select 1 from public.group_members
+    where group_id = p_group_id and user_id = p_user_id
+  ) then
+    raise exception 'That person is not a member of this group';
   end if;
 
   select g.name into v_name

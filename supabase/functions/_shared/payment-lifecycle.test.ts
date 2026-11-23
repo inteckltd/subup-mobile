@@ -1558,6 +1558,12 @@ test('payout person, capture retry, and future player columns are guarded', () =
     const removal = source.indexOf('delete from public.group_members');
     assert.ok(guard > 0 && removal > guard, signature);
   }
+  const account = body(payout, 'delete_my_account()');
+  assert.match(account, /gm\.user_id <> v_uid/);
+  assert.match(account, /invited_user_id/);
+  assert.match(account, /starts_at > now\(\)/);
+  assert.match(body(payout, 'kick_group_member('), /Only group admins can remove members/);
+  assert.match(body(payout, 'kick_group_member('), /That person is not a member of this group/);
   assert.match(body(payout, 'leave_group('), /Promote another admin before leaving or removing the last admin/);
   assert.match(body(payout, 'kick_group_member('), /Promote another admin before leaving or removing the last admin/);
   assert.match(confirmShort, /captureOne\(/);
