@@ -25,9 +25,19 @@ begin
   end if;
 
   v_game_id := v_player.game_id;
+  -- Same lock as leave_game, so a join cannot take the freed spot
+  -- before the waitlist is promoted.
+  perform 1 from public.games where id = v_game_id for update;
+
   delete from public.game_players where id = v_player.id;
 
-  -- A raw delete leaves a game stuck on full. Same recount leave_game uses.
+  v_promoted := null;
+  if not v_player.is_waitlisted then
+    v_promoted := public.promote_waitlist_if_going_ahead(v_game_id);
+  end if;
+
+  -- Recount after promotion. Counting first leaves a refilled game
+  -- marked open, and a concurrent join can take the same spot.
   v_held := public.game_held_spots(v_game_id);
   update public.games
   set status = case
@@ -37,13 +47,12 @@ begin
   end
   where id = v_game_id;
 
-  v_promoted := public.promote_waitlist_if_going_ahead(v_game_id);
   return v_promoted;
 end;
 $$;
 
 comment on function public.drop_player_after_released_leave(uuid) is
-  'Service-role leave after Stripe has already refunded or cancelled the hold. Deletes the seat, recounts the game, and promotes the waitlist. Returns the promoted user id.';
+  'Service-role leave after Stripe has already refunded or cancelled the hold. Deletes the seat, promotes the waitlist when the leaver was seated, then recounts the game. Returns the promoted user id.';
 
 revoke all on function public.drop_player_after_released_leave(uuid) from public, anon, authenticated;
 grant execute on function public.drop_player_after_released_leave(uuid) to service_role;

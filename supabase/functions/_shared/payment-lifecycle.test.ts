@@ -299,9 +299,10 @@ function ledgerRpc(db: Database) {
       const player = db.game_players[index];
       db.game_players.splice(index, 1);
       const game = db.games.find((row) => row.id === player.game_id);
-      if (game?.status === 'full') game.status = 'open';
+      if (player.is_waitlisted) return { data: null, error: null };
       const waiting = db.game_players.find((row) => row.game_id === player.game_id && row.is_waitlisted);
       if (!waiting || !game || game.status === 'cancelled' || (game.shortfall_at && !game.shortfall_confirmed_at)) {
+        if (game?.status === 'full') game.status = 'open';
         return { data: null, error: null };
       }
       waiting.is_waitlisted = false;
@@ -1066,6 +1067,10 @@ test('migration 042 closes joining, guards leave, and will not pick unsettled te
   assert.match(promoted, /'source', 'lock'/);
   assert.match(promoted, /needsPayment/);
   assert.match(promoted, /groupId/);
+  assert.match(promoted, /'pending'::public\.payment_status/);
+  assert.match(promoted, /'paid'::public\.payment_status/);
+  assert.equal(promoted.includes("then 'pending' else 'paid'"), false);
+  assert.match(sql, /coalesce\(nullif\(v_game\.title, ''\), v_group_name, 'A game'\) \|\| ' did not get a decision by kickoff/);
 });
 
 test('lock drops a saved card on confirm and on a short game, and one failure does not stop the next', async () => {
@@ -1665,11 +1670,18 @@ test('payout person, capture retry, and future player columns are guarded', () =
   assert.equal(lockIndex.slice(settleAt - 80, settleAt).includes('try {'), true);
   const leavePaid = readFileSync(join(root, 'supabase/functions/leave-paid-game/index.ts'), 'utf8');
   assert.ok(leavePaid.indexOf("rpc('note_hold_canceled'") < leavePaid.indexOf("rpc('leave_game'"));
+  assert.match(leavePaid, /note_hold_canceled failed after Stripe cancel/);
+  assert.equal(leavePaid.includes('if (noteError) throw noteError'), false);
   assert.match(leavePaid, /stripe_payment_method_id: null/);
   assert.match(leavePaid, /offsession_attempted_at: new Date\(\)\.toISOString\(\)/);
+  const notifyWait = readFileSync(join(root, 'supabase/functions/notify-waitlist-promoted/index.ts'), 'utf8');
+  assert.match(notifyWait, /\.select\('id'\)/);
+  assert.match(notifyWait, /source === 'lock'/);
   const droppedLeave = readFileSync(join(root, 'supabase/migrations/047_drop_released_leave.sql'), 'utf8');
-  assert.match(droppedLeave, /promote_waitlist_if_going_ahead/);
-  assert.match(droppedLeave, /game_held_spots/);
+  assert.match(droppedLeave, /if not v_player\.is_waitlisted then/);
+  const promoteCall = droppedLeave.indexOf('v_promoted := public.promote_waitlist_if_going_ahead');
+  const recountCall = droppedLeave.indexOf('v_held := public.game_held_spots');
+  assert.ok(promoteCall > 0 && recountCall > promoteCall);
   assert.match(droppedLeave, /when status = 'full' and v_held < max_players then 'open'/);
   assert.match(grantCheck, /has_column_privilege/);
   assert.match(grantCheck, /next_detach_check_at/);
@@ -2006,7 +2018,7 @@ test('a released leave that cannot call leave_game still promotes the waitlist',
   });
   assert.equal(result.outcome, 'dropped');
   assert.equal(result.promotedUserId, 'u2');
-  assert.equal(db.games[0].status, 'open');
+  assert.equal(db.games[0].status, 'full');
   assert.equal(db.game_players.find((row) => row.id === 'gp-wait')?.is_waitlisted, false);
   assert.equal(db.game_players.some((row) => row.id === 'gp-paid'), false);
 });

@@ -132,13 +132,17 @@ Deno.serve(async (req) => {
   // first so that cron does not send the same one. A leave's own promotion
   // has no source, and stamping it is harmless.
   if (rows[0].id) {
-    const { error: stampError } = await serviceClient
+    const { data: stamped, error: stampError } = await serviceClient
       .from('notifications')
       .update({ pushed_at: new Date().toISOString() })
       .eq('id', rows[0].id)
-      .is('pushed_at', null);
+      .is('pushed_at', null)
+      .select('id');
     if (stampError) {
       console.error('[notify-waitlist-promoted] could not stamp pushed_at', stampError);
+    } else if ((stamped ?? []).length === 0 && rows[0].data?.source === 'lock') {
+      // The lock cron already claimed this promotion.
+      return jsonResponse({ ok: true, notified: rows.length, pushed: 0 });
     }
   }
 

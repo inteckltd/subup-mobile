@@ -25,3 +25,29 @@ jobs:
       - run: npm test
       - run: node --experimental-strip-types --test supabase/functions/_shared/lock-decision.test.ts supabase/functions/_shared/join-payment-flow.test.ts supabase/functions/_shared/payment-hotfix.test.ts supabase/functions/_shared/payment-lifecycle.test.ts
         working-directory: ${{ github.workspace }}
+
+  sql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: npm run test:sql
+        env:
+          PAYMENT_SQL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres

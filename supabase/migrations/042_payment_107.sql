@@ -107,7 +107,10 @@ begin
 
   update public.game_players
   set is_waitlisted = false,
-      payment_status = case when v_game.price_cents > 0 then 'pending' else 'paid' end,
+      payment_status = case
+        when v_game.price_cents > 0 then 'pending'::public.payment_status
+        else 'paid'::public.payment_status
+      end,
       pending_expires_at = case
         when v_game.price_cents > 0 then now() + interval '30 minutes'
         else null
@@ -590,7 +593,7 @@ begin
         gp.user_id,
         'game_cancelled',
         'Game cancelled',
-        v_game.title || ' did not get a decision by kickoff, so it was cancelled.',
+        coalesce(nullif(v_game.title, ''), v_group_name, 'A game') || ' did not get a decision by kickoff, so it was cancelled.',
         jsonb_build_object('gameId', v_game.id, 'groupId', v_game.group_id, 'type', 'game_cancelled')
       from public.game_players gp
       where gp.game_id = v_game.id;

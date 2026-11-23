@@ -114,7 +114,12 @@ Deno.serve(async (req) => {
         const { error: noteError } = await service.rpc('note_hold_canceled', {
           p_payment_intent_id: paymentIntentId,
         });
-        if (noteError) throw noteError;
+        // Stripe has already cancelled. A ledger-note failure must not
+        // tell the player they could not leave.
+        if (noteError) {
+          console.error('[leave-paid-game] note_hold_canceled failed after Stripe cancel', noteError);
+          await captureEdgeError('leave-paid-game', noteError);
+        }
       }
       const { error: clearError } = await service
         .from('game_players')
