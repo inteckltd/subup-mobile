@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
         expand: ['latest_charge'],
       });
       if (intent.status === 'requires_capture') {
-        const result = await authorizeJoin(service, stripe, intent);
+        const result = await authorizeJoin(service, stripe, intent, 'sync-join-payment');
         if (result === 'canceled') {
           return jsonResponse({ ok: false, error: "Couldn't keep your spot" }, 409);
         }
@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
       }
       if (intent.status === 'succeeded') {
         // Same RPC as the webhook. Covers an immediate capture and a captured hold.
-        const result = await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
+        const result = await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge), 'sync-join-payment');
         return jsonResponse({ ok: true, status: result === 'skipped_refunded' ? 'refunded' : 'paid' });
       }
     }

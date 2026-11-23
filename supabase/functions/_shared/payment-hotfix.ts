@@ -153,7 +153,9 @@ export const REFUND_SWEEP_MAX_FAILURES = 5;
  * Cancelled, treasurer not paid out, and kickoff is inside the refund
  * window. Payouts skip cancelled games, so money still on the card after
  * kickoff has to be refunded here. The window closes about 30 days after
- * starts_at. A cancelled game with no kickoff time is still included.
+ * starts_at. games.starts_at is NOT NULL (003_domain.sql) and is not
+ * nullable in any later migration. A missing kickoff is rejected so a null
+ * cannot stay in the sweep forever.
  */
 export function cancelledGameNeedsRefundSweep(
   game: { status: string; startsAt: string | null; treasurerPayoutId: string | null },
@@ -161,7 +163,7 @@ export function cancelledGameNeedsRefundSweep(
 ): boolean {
   if (game.status !== 'cancelled') return false;
   if (game.treasurerPayoutId) return false;
-  if (!game.startsAt) return true;
+  if (!game.startsAt) return false;
   const startsAt = Date.parse(game.startsAt);
   if (!Number.isFinite(startsAt)) return false;
   return nowMs <= startsAt + CANCELLED_REFUND_WINDOW_MS;
@@ -187,17 +189,44 @@ export function refundSweepShouldAttempt(
   return until <= nowMs;
 }
 
-/** Delay before the next try. null means stop calling Stripe. */
+/**
+ * Delay before the next try. null means stop calling Stripe.
+ * The last wait is 26 hours, past Stripe's 24-hour idempotency-key
+ * window, so the final attempt is a new request rather than a replay of
+ * the cached error. Then we give up.
+ */
 export function refundSweepBackoffMs(failureCountAfterThisAttempt: number): number | null {
   if (failureCountAfterThisAttempt >= REFUND_SWEEP_MAX_FAILURES) return null;
   const steps = [
     15 * 60 * 1000,
     60 * 60 * 1000,
-    4 * 60 * 60 * 1000,
-    12 * 60 * 60 * 1000,
+    6 * 60 * 60 * 1000,
+    26 * 60 * 60 * 1000,
   ];
   const index = Math.max(0, failureCountAfterThisAttempt - 1);
   return steps[Math.min(index, steps.length - 1)];
+}
+
+/** True only on the attempt that crosses the give-up line. */
+export function refundSweepJustGaveUp(previousCount: number, nextCount: number): boolean {
+  return previousCount < REFUND_SWEEP_MAX_FAILURES && nextCount >= REFUND_SWEEP_MAX_FAILURES;
+}
+
+export const REFUND_ABANDONED_TITLE = 'Refund abandoned: manual action needed';
+
+/** A hold the bank did not keep. Safe to cancel and detach. */
+export function offSessionHoldIsDead(status: string): boolean {
+  return status === 'requires_payment_method' || status === 'canceled';
+}
+
+/** Money or an authorisation is still at the bank. Never cancel these. */
+export function offSessionHoldIsLive(status: string): boolean {
+  return status === 'requires_capture' || status === 'processing' || status === 'succeeded';
+}
+
+/** The charge already has the pitch (or the whole amount) back. */
+export function chargeRefundCovers(amountRefunded: number | null | undefined, owedCents: number): boolean {
+  return typeof amountRefunded === 'number' && owedCents > 0 && amountRefunded >= owedCents;
 }
 
 export function nextRefundSweepBackoff(

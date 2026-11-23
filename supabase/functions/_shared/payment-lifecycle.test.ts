@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { authorizeJoin, confirmPaidJoin, noteJoinPaymentFailed, placeDueOffSessionHolds, sweepCancelledGameRefunds } from './lock-runner.ts';
+import { authorizeJoin, confirmPaidJoin, noteJoinPaymentFailed, placeDueOffSessionHolds, releaseOutstandingCancelledGame, sweepCancelledGameRefunds } from './lock-runner.ts';
+import { REFUND_ABANDONED_TITLE } from './payment-hotfix.ts';
 import { refundPaymentIntent } from './refunds.ts';
 
 const globalScope = globalThis as { Deno?: { env: { get: (name: string) => string | undefined } } };
@@ -66,7 +67,7 @@ function orMatches(expression: string, row: Row): boolean {
   });
 }
 
-type Filter = { kind: 'eq' | 'neq' | 'in' | 'gt' | 'gte' | 'is'; column: string; value: unknown } | { kind: 'or'; expression: string };
+type Filter = { kind: 'eq' | 'neq' | 'in' | 'gt' | 'gte' | 'lt' | 'is'; column: string; value: unknown } | { kind: 'or'; expression: string };
 
 function matches(row: Row, filters: Filter[]): boolean {
   return filters.every((filter) => {
@@ -78,6 +79,7 @@ function matches(row: Row, filters: Filter[]): boolean {
     if (filter.kind === 'is') return filter.value == null ? value == null : value === filter.value;
     if (value == null) return false;
     if (filter.kind === 'gt') return String(value) > String(filter.value);
+    if (filter.kind === 'lt') return String(value) < String(filter.value);
     return String(value) >= String(filter.value);
   });
 }
@@ -126,6 +128,10 @@ function query(db: Database, table: keyof Database) {
     },
     gte(column: string, value: unknown) {
       filters.push({ kind: 'gte', column, value });
+      return builder;
+    },
+    lt(column: string, value: unknown) {
+      filters.push({ kind: 'lt', column, value });
       return builder;
     },
     or(expression: string) {
@@ -628,4 +634,276 @@ test('an off-session hold is attached to the ledger before it is confirmed', asy
   assert.equal(log.includes('cancel:pi_hold'), false);
   assert.equal(db.game_payments[0]?.status, 'requires_capture');
   assert.equal(db.game_players[0].payment_status, 'authorized');
+});
+
+let consoleQueue: Promise<void> = Promise.resolve();
+
+function captureErrors(run: () => Promise<void>): Promise<string[]> {
+  const turn = consoleQueue.then(async () => {
+    const lines: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map((part) => {
+        if (typeof part === 'string') return part;
+        if (part instanceof Error) return part.message;
+        try {
+          return JSON.stringify(part);
+        } catch {
+          return String(part);
+        }
+      }).join(' '));
+    };
+    try {
+      await run();
+      return lines;
+    } finally {
+      console.error = original;
+    }
+  });
+  consoleQueue = turn.then(() => {}, () => {});
+  return turn;
+}
+
+function abandonedLines(lines: string[]): string[] {
+  return lines.filter((line) => line.includes(REFUND_ABANDONED_TITLE));
+}
+
+test('giving up on a refund alerts once, with the ledger still owed', async () => {
+  const db = emptyDb();
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  db.games.push(cancelledGame('g-giveup', yesterday));
+  db.game_payments.push({
+    ...succeededPayment('giveup', 'g-giveup', 'gp-giveup'),
+    amount_cents: 2500,
+    refund_failure_count: 4,
+    refund_backoff_until: yesterday,
+    refund_abandoned_at: null,
+  });
+  db.game_players.push({
+    id: 'gp-giveup',
+    game_id: 'g-giveup',
+    user_id: 'u1',
+    payment_status: 'paid',
+    stripe_payment_intent_id: 'pi-giveup',
+  });
+  const harness = sweepStripe();
+  harness.setFail(true);
+  const service = serviceFor(db, ledgerRpc(db));
+  const lines = await captureErrors(async () => {
+    await sweepCancelledGameRefunds(service as never, harness.stripe as never);
+    await sweepCancelledGameRefunds(service as never, harness.stripe as never);
+  });
+  const alerts = abandonedLines(lines);
+  assert.equal(alerts.length, 1);
+  assert.match(alerts[0], /refund_abandoned/);
+  assert.match(alerts[0], /"ledgerId":"giveup"/);
+  assert.match(alerts[0], /"gameId":"g-giveup"/);
+  assert.match(alerts[0], /"amountCents":2500/);
+  assert.match(alerts[0], /"status":"succeeded"/);
+  const payment = db.game_payments[0];
+  assert.equal(payment.status, 'succeeded');
+  assert.equal(payment.refund_failure_count, 5);
+  assert.equal(typeof payment.refund_abandoned_at, 'string');
+  assert.equal(harness.refunds.length, 0);
+});
+
+test('an admin refund retries a row the sweep has given up on', async () => {
+  const db = emptyDb();
+  db.game_payments.push({
+    ...succeededPayment('stuck', 'g-stuck', 'gp-stuck'),
+    amount_cents: 2500,
+    refund_failure_count: 5,
+    refund_backoff_until: null,
+    refund_abandoned_at: new Date().toISOString(),
+  });
+  db.game_players.push({
+    id: 'gp-stuck',
+    game_id: 'g-stuck',
+    user_id: 'u1',
+    payment_status: 'paid',
+    stripe_payment_intent_id: 'pi-stuck',
+  });
+  const harness = sweepStripe();
+  const service = serviceFor(db, ledgerRpc(db));
+  const skipped = await releaseOutstandingCancelledGame(service as never, harness.stripe as never, 'g-stuck');
+  assert.equal(skipped.released, 0);
+  assert.equal(harness.refunds.length, 0);
+  assert.equal(db.game_payments[0].status, 'succeeded');
+
+  const retried = await releaseOutstandingCancelledGame(
+    service as never,
+    harness.stripe as never,
+    'g-stuck',
+    { manual: true },
+  );
+  assert.equal(retried.released, 1);
+  assert.deepEqual(harness.refunds.map((refund) => refund.key), ['refund-stuck']);
+  assert.equal(db.game_payments[0].status, 'refunded');
+  assert.equal(db.game_payments[0].refund_failure_count, 0);
+  assert.equal(db.game_payments[0].refund_abandoned_at, null);
+});
+
+test('a null kickoff is not swept, and a game past 30 days is alerted once', async () => {
+  const db = emptyDb();
+  const tooOld = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+  db.games.push(
+    { ...cancelledGame('g-null', tooOld), starts_at: null },
+    cancelledGame('g-old', tooOld),
+  );
+  db.game_payments.push(
+    succeededPayment('nullpay', 'g-null', 'gp-null'),
+    succeededPayment('old', 'g-old', 'gp-old'),
+  );
+  const harness = sweepStripe();
+  const service = serviceFor(db, ledgerRpc(db));
+  const lines = await captureErrors(async () => {
+    await sweepCancelledGameRefunds(service as never, harness.stripe as never);
+    await sweepCancelledGameRefunds(service as never, harness.stripe as never);
+  });
+  assert.equal(harness.refunds.length, 0);
+  assert.equal(db.game_payments.find((row) => row.id === 'nullpay')?.status, 'succeeded');
+  assert.equal(db.game_payments.find((row) => row.id === 'nullpay')?.refund_abandoned_at ?? null, null);
+  const alerts = abandonedLines(lines);
+  assert.equal(alerts.length, 1);
+  assert.match(alerts[0], /"ledgerId":"old"/);
+  assert.match(alerts[0], /"gameId":"g-old"/);
+  assert.match(alerts[0], /window_elapsed/);
+  assert.equal(alerts.some((line) => line.includes('g-null')), false);
+  assert.equal(typeof db.games.find((row) => row.id === 'g-old')?.refund_window_alerted_at, 'string');
+  assert.equal(db.game_payments.find((row) => row.id === 'old')?.status, 'succeeded');
+});
+
+test('heal alerts from the webhook are tagged with that caller', async () => {
+  const db = emptyDb();
+  const service = serviceFor(db, ledgerRpc(db));
+  const intent = { ...intentFixture({}), id: 'pi_webhook_source' };
+  const blank = healStripe(intent);
+  const lines = await captureErrors(async () => {
+    await confirmPaidJoin(service as never, blank.stripe as never, 'pi_webhook_source', 'ch_1', 'stripe-webhooks');
+  });
+  const healing = lines.filter((line) => line.includes('Not healing PaymentIntent pi_webhook_source'));
+  assert.equal(healing.length, 1);
+  assert.ok(healing[0].startsWith('[stripe-webhooks]'));
+  assert.equal(blank.refunds.length, 0);
+  assert.equal(blank.cancels.length, 0);
+});
+
+test('a pitch refund is skipped when the charge already refunded that amount', async () => {
+  const ledgerId = '6b1e0b2a-1c3d-4e5f-8a9b-0c1d2e3f4a5b';
+  const refunds: unknown[] = [];
+  const reversals: unknown[] = [];
+  const stripe = {
+    paymentIntents: {
+      retrieve: async () => ({
+        id: 'pi_done',
+        latest_charge: {
+          id: 'ch_done',
+          amount_refunded: 1000,
+          transfer: { id: 'tr_done', amount_reversed: 1000 },
+        },
+      }),
+    },
+    refunds: {
+      create: async () => {
+        refunds.push(true);
+        return { id: 're_1' };
+      },
+    },
+    transfers: {
+      createReversal: async () => {
+        reversals.push(true);
+        return { id: 'trr_1' };
+      },
+    },
+  };
+  await refundPaymentIntent(stripe as never, 'pi_done', 1000, { paymentRowId: ledgerId, scope: 'pitch' });
+  assert.equal(refunds.length, 0);
+  assert.equal(reversals.length, 0);
+});
+
+function dueHoldRow() {
+  return {
+    game_player_id: 'gp1',
+    user_id: 'u1',
+    game_id: 'g1',
+    group_id: 'grp1',
+    game_label: 'Tuesday',
+    stripe_payment_method_id: 'pm_1',
+    stripe_customer_id: 'cus_1',
+    stripe_account_id: 'acct_1',
+    pitch_cents: 1000,
+    fee_cents: 100,
+    total_cents: 1100,
+  };
+}
+
+test('a failed off-session confirm reads the PaymentIntent before cancelling', async () => {
+  async function afterTimeout(retrievedStatus: string) {
+    const db = emptyDb();
+    const log: string[] = [];
+    db.game_players.push({
+      id: 'gp1',
+      game_id: 'g1',
+      user_id: 'u1',
+      payment_status: 'card_saved',
+      stripe_payment_intent_id: null,
+    });
+    db.dueHolds.push(dueHoldRow());
+    const stripe = {
+      paymentIntents: {
+        create: async (params: { metadata?: Record<string, string> }) => ({
+          id: 'pi_hold',
+          status: 'requires_payment_method',
+          payment_method: 'pm_1',
+          metadata: params.metadata,
+        }),
+        confirm: async () => {
+          log.push('confirm');
+          throw new Error('confirm timed out');
+        },
+        retrieve: async (id: string) => {
+          log.push('retrieve');
+          return {
+            id,
+            status: retrievedStatus,
+            capture_method: 'manual',
+            amount_capturable: retrievedStatus === 'requires_capture' ? 1100 : 0,
+            payment_method: 'pm_1',
+            latest_charge: retrievedStatus === 'succeeded' ? { id: 'ch_hold' } : null,
+            metadata: { game_id: 'g1', user_id: 'u1', game_player_id: 'gp1' },
+          };
+        },
+        cancel: async (id: string) => {
+          log.push('cancel');
+          return { id, status: 'canceled' };
+        },
+      },
+    };
+    await placeDueOffSessionHolds(serviceFor(db, ledgerRpc(db)) as never, stripe as never);
+    return { db, log };
+  }
+
+  const held = await afterTimeout('requires_capture');
+  assert.deepEqual(held.log, ['confirm', 'retrieve']);
+  assert.equal(held.db.game_players[0].payment_status, 'authorized');
+  assert.equal(held.db.game_players[0].stripe_payment_intent_id, 'pi_hold');
+  assert.equal(held.db.game_payments[0]?.status, 'requires_capture');
+  assert.equal(held.db.notifications.length, 0);
+
+  const processing = await afterTimeout('processing');
+  assert.deepEqual(processing.log, ['confirm', 'retrieve']);
+  assert.equal(processing.db.game_players[0].stripe_payment_intent_id, 'pi_hold');
+  assert.equal(processing.db.game_players[0].payment_status, 'card_saved');
+  assert.equal(processing.db.notifications.length, 0);
+
+  const paid = await afterTimeout('succeeded');
+  assert.deepEqual(paid.log, ['confirm', 'retrieve']);
+  assert.equal(paid.db.game_players[0].payment_status, 'paid');
+  assert.equal(paid.db.game_players[0].stripe_payment_intent_id, 'pi_hold');
+  assert.equal(paid.db.notifications.length, 0);
+
+  const dead = await afterTimeout('requires_payment_method');
+  assert.deepEqual(dead.log, ['confirm', 'retrieve', 'cancel']);
+  assert.equal(dead.db.game_players[0].stripe_payment_intent_id, null);
+  assert.equal(dead.db.notifications.length, 1);
 });

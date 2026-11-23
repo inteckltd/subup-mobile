@@ -13,3 +13,31 @@ export async function captureEdgeError(source: string, error: unknown) {
     console.error(`[${source}] sentry failed`, sentryError);
   }
 }
+
+/**
+ * A distinct alert, not an exception. `tags.alert` is the value to page on.
+ * Logged even when Sentry is unset, so a test can see that it fired once.
+ */
+export async function captureEdgeAlert(input: {
+  source: string;
+  title: string;
+  level: 'fatal' | 'error';
+  tags: Record<string, string>;
+  extra: Record<string, unknown>;
+}) {
+  console.error(`[${input.source}] ${input.title}`, { ...input.tags, ...input.extra });
+  const dsn = Deno.env.get('SENTRY_DSN');
+  if (!dsn) return;
+  try {
+    const Sentry = await import('npm:@sentry/deno');
+    Sentry.init({ dsn });
+    Sentry.captureMessage(input.title, {
+      level: input.level,
+      tags: { function: input.source, ...input.tags },
+      extra: input.extra,
+    });
+    await Sentry.flush(2000);
+  } catch (sentryError) {
+    console.error(`[${input.source}] sentry failed`, sentryError);
+  }
+}

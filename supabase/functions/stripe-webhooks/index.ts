@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
         // Immediate-capture (1.0.6) and a later hold capture both land here.
         // A refunded row stays refunded: the PaymentIntent status is still succeeded.
         const intent = event.data.object as Stripe.PaymentIntent;
-        await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
+        await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge), 'stripe-webhooks');
         break;
       }
       case 'payment_intent.amount_capturable_updated': {
@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
         // Automatic capture never authorises a hold. Ignore it so a 1.0.6
         // charge cannot be stored as payment_status 'authorized'.
         if (intent.capture_method === 'manual' && intent.status === 'requires_capture' && intent.amount_capturable > 0) {
-          await authorizeJoin(service, stripe, intent);
+          await authorizeJoin(service, stripe, intent, 'stripe-webhooks');
         }
         break;
       }

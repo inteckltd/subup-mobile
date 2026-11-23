@@ -13,6 +13,10 @@ import {
   paymentNeedsCancelledGameRelease,
   REFUND_SWEEP_MAX_FAILURES,
   refundIdempotencyKey,
+  chargeRefundCovers,
+  offSessionHoldIsDead,
+  offSessionHoldIsLive,
+  refundSweepBackoffMs,
   refundSweepShouldAttempt,
   reversalIdempotencyKey,
   succeededRefundScope,
@@ -166,7 +170,11 @@ test('the cancel sweep keeps going after kickoff, then stops about 30 days later
   );
   assert.equal(
     cancelledGameNeedsRefundSweep({ status: 'cancelled', startsAt: null, treasurerPayoutId: null }, now),
-    true,
+    false,
+  );
+  assert.equal(
+    cancelledGameNeedsRefundSweep({ status: 'cancelled', startsAt: 'not-a-date', treasurerPayoutId: null }, now),
+    false,
   );
   assert.equal(succeededRefundScope(true), 'pitch');
   assert.equal(succeededRefundScope(false), 'full');
@@ -212,6 +220,25 @@ test('the refund sweep backs off and then stops', () => {
     refundSweepShouldAttempt({ failureCount: REFUND_SWEEP_MAX_FAILURES, backoffUntil: null }, now),
     false,
   );
+  const hour = 60 * 60 * 1000;
+  assert.equal(refundSweepBackoffMs(1), 15 * 60 * 1000);
+  assert.equal(refundSweepBackoffMs(2), hour);
+  assert.equal(refundSweepBackoffMs(3), 6 * hour);
+  assert.equal(refundSweepBackoffMs(4), 26 * hour);
+  assert.ok((refundSweepBackoffMs(4) ?? 0) > 24 * hour);
+  assert.equal(refundSweepBackoffMs(5), null);
+  assert.equal(chargeRefundCovers(1000, 1000), true);
+  assert.equal(chargeRefundCovers(999, 1000), false);
+  assert.equal(chargeRefundCovers(null, 1000), false);
+  assert.equal(offSessionHoldIsDead('requires_payment_method'), true);
+  assert.equal(offSessionHoldIsDead('canceled'), true);
+  assert.equal(offSessionHoldIsDead('requires_capture'), false);
+  assert.equal(offSessionHoldIsDead('processing'), false);
+  assert.equal(offSessionHoldIsDead('succeeded'), false);
+  assert.equal(offSessionHoldIsLive('requires_capture'), true);
+  assert.equal(offSessionHoldIsLive('processing'), true);
+  assert.equal(offSessionHoldIsLive('succeeded'), true);
+  assert.equal(offSessionHoldIsLive('requires_payment_method'), false);
   assert.equal(connectedAccountEventSkipsJoinHeal('acct_123'), true);
   assert.equal(connectedAccountEventSkipsJoinHeal(undefined), false);
   assert.equal(connectedAccountEventSkipsJoinHeal(''), false);

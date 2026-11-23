@@ -14,20 +14,25 @@ import {
   classifyIntentForExpiry,
   ledgerStatusAfterPaymentFailure,
   nextRefundSweepBackoff,
+  offSessionHoldIsDead,
+  offSessionHoldIsLive,
   orphanHealAction,
   paymentIntentIsSubUpJoin,
   paymentNeedsCancelledGameRelease,
+  refundSweepJustGaveUp,
   refundSweepShouldAttempt,
   type JoinIntentMetadata,
   type RestoreResult,
 } from './payment-hotfix.ts';
 import {
+  alertRefundAbandoned,
   clearRefundAttempt,
   isIdempotentRefundError,
   markRefundAttemptFailed,
   refundAttemptIsDue,
   refundPaymentIntent,
   refundSucceededPayments,
+  type RefundReleaseOptions,
 } from './refunds.ts';
 import { captureEdgeError } from './sentry.ts';
 
@@ -146,6 +151,47 @@ async function notifyCardConfirm(service: SupabaseClient, row: DueHold): Promise
   });
 }
 
+/** The bank kept the money or the authorisation. Do not cancel, and do not ask for a new card. */
+async function settleLiveOffSessionHold(
+  service: SupabaseClient,
+  stripe: Stripe,
+  intent: Stripe.PaymentIntent,
+): Promise<boolean> {
+  if (intent.status === 'requires_capture') {
+    await markAuthorized(service, stripe, intent);
+    return true;
+  }
+  if (intent.status === 'succeeded') {
+    await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
+    return true;
+  }
+  return false;
+}
+
+/**
+ * The PaymentIntent is dead. Cancel it if Stripe still will, then drop the
+ * player's reference so a later card does not point at it.
+ */
+async function abandonDeadOffSessionHold(
+  service: SupabaseClient,
+  stripe: Stripe,
+  row: DueHold,
+  intent: Stripe.PaymentIntent,
+): Promise<void> {
+  if (intent.status !== 'canceled') {
+    await stripe.paymentIntents.cancel(intent.id).catch(() => {});
+  }
+  const { error: clearError } = await service
+    .from('game_players')
+    .update({ stripe_payment_intent_id: null })
+    .eq('id', row.game_player_id)
+    .eq('stripe_payment_intent_id', intent.id);
+  if (clearError) console.error('[lock] could not clear dead off-session intent', row.game_player_id, clearError);
+  await service.rpc('note_hold_canceled', { p_payment_intent_id: intent.id });
+  await service.rpc('mark_offsession_attempted', { p_game_player_id: row.game_player_id });
+  await notifyCardConfirm(service, row);
+}
+
 /** Off-session hold for saved cards once lock is inside 4 days. One attempt. */
 export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: Stripe): Promise<void> {
   const { data, error } = await service.rpc('list_players_due_offsession_hold');
@@ -153,6 +199,7 @@ export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: S
 
   for (const row of (data ?? []) as DueHold[]) {
     if (!row.stripe_customer_id || !row.stripe_payment_method_id || !row.stripe_account_id) continue;
+    let paymentIntentId: string | null = null;
     try {
       // Attach the ledger row before the PaymentIntent can become
       // requires_capture. Confirming in the create call lets
@@ -175,6 +222,7 @@ export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: S
         },
         { idempotencyKey: `hold:${row.game_player_id}:attached` },
       );
+      paymentIntentId = created.id;
       const { error: attachError } = await service.rpc('attach_payment_intent', {
         p_game_player_id: row.game_player_id,
         p_payment_intent_id: created.id,
@@ -183,12 +231,12 @@ export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: S
         p_pitch_cents: row.pitch_cents,
       });
       if (attachError) {
-        if (created.status !== 'succeeded') {
+        if (offSessionHoldIsDead(created.status)) {
           await stripe.paymentIntents.cancel(created.id).catch(() => {});
         }
         throw attachError;
       }
-      const intent = created.status === 'requires_capture' || created.status === 'succeeded'
+      const intent = offSessionHoldIsLive(created.status)
         ? created
         : await stripe.paymentIntents.confirm(
           created.id,
@@ -199,19 +247,31 @@ export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: S
           },
           { idempotencyKey: `hold-confirm:${row.game_player_id}` },
         );
-      if (intent.status === 'requires_capture') {
-        await markAuthorized(service, stripe, intent);
+      if (await settleLiveOffSessionHold(service, stripe, intent)) continue;
+      if (offSessionHoldIsLive(intent.status)) continue;
+      if (offSessionHoldIsDead(intent.status)) {
+        await abandonDeadOffSessionHold(service, stripe, row, intent);
         continue;
       }
-      if (intent.status === 'succeeded') {
-        await confirmPaidJoin(service, stripe, intent.id, paymentIntentChargeId(intent.latest_charge));
-        continue;
-      }
-      await stripe.paymentIntents.cancel(intent.id).catch(() => {});
       await service.rpc('mark_offsession_attempted', { p_game_player_id: row.game_player_id });
       await notifyCardConfirm(service, row);
     } catch (holdError) {
       console.error('[lock] off-session hold failed', row.game_player_id, stripeCode(holdError), holdError);
+      // A timeout can land after the bank accepted the hold. Read it back
+      // before cancelling. Only a dead intent is cancelled and detached.
+      if (paymentIntentId) {
+        try {
+          const latest = await stripe.paymentIntents.retrieve(paymentIntentId);
+          if (await settleLiveOffSessionHold(service, stripe, latest)) continue;
+          if (offSessionHoldIsLive(latest.status)) continue;
+          if (offSessionHoldIsDead(latest.status)) {
+            await abandonDeadOffSessionHold(service, stripe, row, latest);
+            continue;
+          }
+        } catch (retrieveError) {
+          console.error('[lock] off-session retrieve failed', paymentIntentId, retrieveError);
+        }
+      }
       await service.rpc('mark_offsession_attempted', { p_game_player_id: row.game_player_id });
       await notifyCardConfirm(service, row);
     }
@@ -692,6 +752,7 @@ async function healMissingPlayer(
   paymentIntentId: string,
   kind: 'captured' | 'hold',
   paymentMethodId: string | null,
+  source = 'apply-game-lock',
 ): Promise<RestoreResult> {
   const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
     expand: ['latest_charge'],
@@ -714,6 +775,7 @@ async function healMissingPlayer(
       stripe,
       intent.id,
       paymentIntentChargeId(intent.latest_charge),
+      source,
     );
     return seated === 'confirmed' ? 'restored' : 'refunded';
   }
@@ -733,7 +795,7 @@ async function healMissingPlayer(
     if (restoreResult === 'missing_payment') {
       console.error('[lock] leaving PaymentIntent alone; not a matching SubUp join', paymentIntentId);
       await captureEdgeError(
-        'apply-game-lock',
+        source,
         new Error(`Not healing PaymentIntent ${paymentIntentId}: metadata is not a matching SubUp join`),
       );
     }
@@ -767,6 +829,7 @@ async function healMissingPlayer(
         stripe,
         again.id,
         paymentIntentChargeId(again.latest_charge),
+        source,
       );
       return seated === 'confirmed' ? 'restored' : 'refunded';
     }
@@ -788,6 +851,7 @@ export async function authorizeJoin(
   service: SupabaseClient,
   stripe: Stripe,
   intent: Stripe.PaymentIntent,
+  source = 'apply-game-lock',
 ): Promise<'authorized' | 'canceled'> {
   const { data: gameId, error } = await service.rpc('mark_join_authorized', {
     p_payment_intent_id: intent.id,
@@ -796,7 +860,7 @@ export async function authorizeJoin(
   });
   if (error) throw error;
   if (gameId) return 'authorized';
-  const healed = await healMissingPlayer(service, stripe, intent.id, 'hold', paymentMethodId(intent));
+  const healed = await healMissingPlayer(service, stripe, intent.id, 'hold', paymentMethodId(intent), source);
   if (healed === 'restored' || healed === 'already_live') return 'authorized';
   return 'canceled';
 }
@@ -811,6 +875,7 @@ export async function confirmPaidJoin(
   stripe: Stripe,
   paymentIntentId: string,
   chargeId: string | null,
+  source = 'apply-game-lock',
 ): Promise<'confirmed' | 'skipped_refunded'> {
   const { data, error } = await service
     .from('game_payments')
@@ -825,7 +890,7 @@ export async function confirmPaidJoin(
   });
   if (rpcError) throw rpcError;
   if (gameId) return 'confirmed';
-  const healed = await healMissingPlayer(service, stripe, paymentIntentId, 'captured', null);
+  const healed = await healMissingPlayer(service, stripe, paymentIntentId, 'captured', null, source);
   if (healed === 'restored' || healed === 'already_live') return 'confirmed';
   return 'skipped_refunded';
 }
@@ -839,11 +904,12 @@ export async function releaseOutstandingCancelledGame(
   service: SupabaseClient,
   stripe: Stripe,
   gameId: string,
+  options?: RefundReleaseOptions,
 ): Promise<{ released: number; failures: number }> {
   let released = 0;
   let failures = 0;
   try {
-    released += await refundSucceededPayments(service, stripe, gameId);
+    released += await refundSucceededPayments(service, stripe, gameId, options);
   } catch (listError) {
     console.error('[lock] succeeded refund list failed', gameId, listError);
     await captureEdgeError('apply-game-lock', listError);
@@ -852,7 +918,7 @@ export async function releaseOutstandingCancelledGame(
 
   const { data, error } = await service
     .from('game_payments')
-    .select('id, stripe_payment_intent_id, pitch_cents, status, refund_failure_count, refund_backoff_until')
+    .select('id, game_id, stripe_payment_intent_id, pitch_cents, amount_cents, status, refund_failure_count, refund_backoff_until, refund_abandoned_at')
     .eq('game_id', gameId)
     .in('status', ['requires_capture', 'requires_payment']);
   if (error) throw error;
@@ -861,12 +927,15 @@ export async function releaseOutstandingCancelledGame(
     id: string;
     stripe_payment_intent_id: string | null;
     pitch_cents: number | null;
+    amount_cents: number | null;
     status: string;
     refund_failure_count: number | null;
     refund_backoff_until: string | null;
+    refund_abandoned_at: string | null;
+    game_id: string;
   }[]) {
     if (!row.stripe_payment_intent_id || !paymentNeedsCancelledGameRelease(row.status)) continue;
-    if (!refundAttemptIsDue(row)) continue;
+    if (!options?.manual && !refundAttemptIsDue(row)) continue;
     try {
       const result = await refundCapturedOrCancel(
         stripe,
@@ -894,7 +963,7 @@ export async function releaseOutstandingCancelledGame(
         continue;
       }
       failures += 1;
-      await markRefundAttemptFailed(service, row);
+      await markRefundAttemptFailed(service, row, Date.now(), options?.source ?? 'apply-game-lock');
       console.error('[lock] cancelled game payment release failed', row.stripe_payment_intent_id, paymentError);
       await captureEdgeError('apply-game-lock', paymentError);
     }
@@ -912,7 +981,8 @@ type SweepGame = {
 };
 
 async function markGameSweepFailed(service: SupabaseClient, game: SweepGame): Promise<void> {
-  const next = nextRefundSweepBackoff(game.refund_sweep_failure_count ?? 0, Date.now());
+  const previous = game.refund_sweep_failure_count ?? 0;
+  const next = nextRefundSweepBackoff(previous, Date.now());
   const { error } = await service
     .from('games')
     .update({
@@ -921,6 +991,68 @@ async function markGameSweepFailed(service: SupabaseClient, game: SweepGame): Pr
     })
     .eq('id', game.id);
   if (error) console.error('[lock] could not record refund sweep backoff', game.id, error);
+  if (refundSweepJustGaveUp(previous, next.failureCount)) {
+    await alertOpenRefunds(service, game.id, 'sweep_failure_limit');
+  }
+}
+
+/**
+ * One fatal alert per still-open ledger row. The stamp stops the next cron
+ * from saying the same thing again.
+ */
+async function alertOpenRefunds(
+  service: SupabaseClient,
+  gameId: string,
+  reason: 'window_elapsed' | 'sweep_failure_limit',
+): Promise<void> {
+  const { data, error } = await service
+    .from('game_payments')
+    .select('id, game_id, status, pitch_cents, amount_cents, refund_abandoned_at')
+    .eq('game_id', gameId)
+    .in('status', ['succeeded', 'requires_capture', 'requires_payment'])
+    .is('refund_abandoned_at', null);
+  if (error) {
+    console.error('[lock] could not list unrefunded rows', gameId, error);
+    return;
+  }
+  const now = new Date().toISOString();
+  for (const row of (data ?? []) as {
+    id: string;
+    game_id: string | null;
+    status: string;
+    pitch_cents: number | null;
+    amount_cents: number | null;
+  }[]) {
+    await alertRefundAbandoned('apply-game-lock', { ...row, game_id: row.game_id ?? gameId }, reason);
+    const { error: stampError } = await service
+      .from('game_payments')
+      .update({ refund_abandoned_at: now })
+      .eq('id', row.id);
+    if (stampError) console.error('[lock] could not stamp abandoned refund', row.id, stampError);
+  }
+}
+
+/** Games that aged out of the sweep still owe money. Say so once. */
+async function alertGamesPastRefundWindow(service: SupabaseClient): Promise<void> {
+  const earliest = new Date(Date.now() - CANCELLED_REFUND_WINDOW_MS).toISOString();
+  const { data, error } = await service
+    .from('games')
+    .select('id, starts_at')
+    .eq('status', 'cancelled')
+    .is('treasurer_payout_id', null)
+    .lt('starts_at', earliest)
+    .is('refund_window_alerted_at', null);
+  if (error) throw error;
+  const now = new Date().toISOString();
+  for (const game of (data ?? []) as { id: string; starts_at: string | null }[]) {
+    if (!game.starts_at) continue;
+    await alertOpenRefunds(service, game.id, 'window_elapsed');
+    const { error: stampError } = await service
+      .from('games')
+      .update({ refund_window_alerted_at: now })
+      .eq('id', game.id);
+    if (stampError) console.error('[lock] could not stamp refund window alert', game.id, stampError);
+  }
 }
 
 async function clearGameSweepFailed(service: SupabaseClient, game: SweepGame): Promise<void> {
@@ -936,8 +1068,9 @@ async function clearGameSweepFailed(service: SupabaseClient, game: SweepGame): P
  * Cancelled games the last run did not finish refunding. Each game is its
  * own try/catch. The treasurer payout path skips cancelled games, so this
  * keeps going after kickoff until about 30 days after starts_at. A game
- * that keeps failing backs off, then stops, instead of calling Stripe and
- * Sentry on every cron run.
+ * that keeps failing backs off, then stops. The stop and the 30-day cap
+ * each raise one fatal alert. games.starts_at is NOT NULL, and a null
+ * kickoff is excluded so it cannot be swept forever.
  */
 export async function sweepCancelledGameRefunds(
   service: SupabaseClient,
@@ -949,7 +1082,7 @@ export async function sweepCancelledGameRefunds(
     .select('id, status, starts_at, treasurer_payout_id, refund_sweep_failure_count, refund_sweep_backoff_until')
     .eq('status', 'cancelled')
     .is('treasurer_payout_id', null)
-    .or(`starts_at.gte.${earliest},starts_at.is.null`);
+    .gte('starts_at', earliest);
   if (error) throw error;
 
   let games = 0;
@@ -981,6 +1114,12 @@ export async function sweepCancelledGameRefunds(
       console.error('[lock] cancelled game refund sweep failed', game.id, gameError);
       await captureEdgeError('apply-game-lock', gameError);
     }
+  }
+  try {
+    await alertGamesPastRefundWindow(service);
+  } catch (windowError) {
+    console.error('[lock] refund window alert failed', windowError);
+    await captureEdgeError('apply-game-lock', windowError);
   }
   return { games, released, failures };
 }

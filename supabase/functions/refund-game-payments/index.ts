@@ -72,7 +72,11 @@ Deno.serve(async (req) => {
     }
 
     const stripe = getStripe();
-    const { released } = await releaseOutstandingCancelledGame(service, stripe, gameId);
+    // An explicit admin call retries rows the cron has given up on.
+    const { released } = await releaseOutstandingCancelledGame(service, stripe, gameId, {
+      manual: true,
+      source: 'refund-game-payments',
+    });
     return jsonResponse({ ok: true, refunded: released });
   } catch (error) {
     await captureEdgeError('refund-game-payments', error);

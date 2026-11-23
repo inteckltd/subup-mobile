@@ -203,20 +203,26 @@ grant execute on function public.restore_orphaned_join(text, text, text) to serv
 
 alter table public.game_payments
   add column if not exists refund_failure_count integer not null default 0,
-  add column if not exists refund_backoff_until timestamptz;
+  add column if not exists refund_backoff_until timestamptz,
+  add column if not exists refund_abandoned_at timestamptz;
 
 alter table public.games
   add column if not exists refund_sweep_failure_count integer not null default 0,
-  add column if not exists refund_sweep_backoff_until timestamptz;
+  add column if not exists refund_sweep_backoff_until timestamptz,
+  add column if not exists refund_window_alerted_at timestamptz;
 
 comment on column public.game_payments.refund_failure_count is
   'Consecutive refund or cancel failures for this ledger row. The sweep stops calling Stripe at 5.';
 comment on column public.game_payments.refund_backoff_until is
   'Do not retry this ledger row before this time.';
+comment on column public.game_payments.refund_abandoned_at is
+  'Set once when this row is given up (five failures, or still open 30 days after kickoff). Stops the fatal alert repeating. Clear it to let the cron try again.';
 comment on column public.games.refund_sweep_failure_count is
   'Consecutive cancelled-game sweep failures for this game. The sweep stops at 5.';
 comment on column public.games.refund_sweep_backoff_until is
   'Do not run the cancelled-game refund sweep for this game before this time.';
+comment on column public.games.refund_window_alerted_at is
+  'Set once the sweep has alerted that this cancelled game aged out of the 30-day refund window with money still open.';
 
 -- A decline writes game_payments.status = failed and leaves the player pending.
 -- The next card on that PaymentIntent is a real hold or a real capture, so
@@ -378,3 +384,22 @@ grant execute on function public.mark_join_card_saved(uuid, text, text) to servi
 --     'confirm_paid_join',
 --     'mark_join_card_saved'
 --   );
+--
+-- The refund sweep selects these columns. Deploying the functions before
+-- this migration makes those queries fail. Each should return one row:
+--
+-- select column_name, is_nullable
+-- from information_schema.columns
+-- where table_schema = 'public'
+--   and (
+--     (table_name = 'game_payments' and column_name in (
+--       'refund_failure_count', 'refund_backoff_until', 'refund_abandoned_at'
+--     ))
+--     or (table_name = 'games' and column_name in (
+--       'refund_sweep_failure_count', 'refund_sweep_backoff_until', 'refund_window_alerted_at'
+--     ))
+--     or (table_name = 'games' and column_name = 'starts_at')
+--   )
+-- order by table_name, column_name;
+--
+-- starts_at is NOT NULL (003_domain.sql). The other six columns are added here.

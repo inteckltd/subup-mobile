@@ -2,13 +2,16 @@ import type Stripe from 'npm:stripe@17.7.0';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import {
+  REFUND_ABANDONED_TITLE,
+  chargeRefundCovers,
   nextRefundSweepBackoff,
   refundIdempotencyKey,
+  refundSweepJustGaveUp,
   refundSweepShouldAttempt,
   reversalIdempotencyKey,
   succeededRefundScope,
 } from './payment-hotfix.ts';
-import { captureEdgeError } from './sentry.ts';
+import { captureEdgeAlert, captureEdgeError } from './sentry.ts';
 
 export function isIdempotentRefundError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
@@ -17,7 +20,17 @@ export function isIdempotentRefundError(error: unknown): boolean {
   );
 }
 
-type MaybeDeletedCharge = { deleted?: boolean; transfer?: string | { id: string; amount_reversed?: number } | null };
+type MaybeDeletedCharge = {
+  deleted?: boolean;
+  amount_refunded?: number;
+  transfer?: string | { id: string; amount_reversed?: number } | null;
+};
+
+function chargeAmountRefunded(charge: Stripe.Charge | MaybeDeletedCharge | string | null): number | null {
+  if (!charge || typeof charge === 'string') return null;
+  if ('deleted' in charge && charge.deleted) return null;
+  return typeof charge.amount_refunded === 'number' ? charge.amount_refunded : null;
+}
 
 function chargeTransfer(
   charge: Stripe.Charge | MaybeDeletedCharge | string | null,
@@ -71,6 +84,7 @@ export async function refundPaymentIntent(
     latest = await stripe.charges.retrieve(latest, { expand: ['transfer'] });
   }
   const transfer = chargeTransfer(latest);
+  const pitchAlreadyRefunded = chargeRefundCovers(chargeAmountRefunded(latest), pitchCents);
 
   if (transfer) {
     let amountReversed = transfer.amountReversed;
@@ -91,6 +105,8 @@ export async function refundPaymentIntent(
     }
   }
 
+  if (pitchAlreadyRefunded) return;
+
   await stripe.refunds.create({
     payment_intent: paymentIntentId,
     amount: pitchCents,
@@ -99,20 +115,56 @@ export async function refundPaymentIntent(
   }, { idempotencyKey });
 }
 
+export type RefundReleaseOptions = { manual?: boolean; source?: string };
+
 type SucceededPaymentRow = {
   id: string;
+  game_id: string;
   stripe_payment_intent_id: string | null;
   pitch_cents: number | null;
+  amount_cents: number | null;
   game_player_id: string | null;
+  status: string;
   refund_failure_count: number | null;
   refund_backoff_until: string | null;
+  refund_abandoned_at: string | null;
 };
 
 type RefundAttemptRow = {
   id: string;
+  game_id?: string | null;
+  pitch_cents?: number | null;
+  amount_cents?: number | null;
+  status?: string | null;
   refund_failure_count?: number | null;
   refund_backoff_until?: string | null;
+  refund_abandoned_at?: string | null;
 };
+
+export async function alertRefundAbandoned(
+  source: string,
+  row: {
+    id?: string | null;
+    game_id?: string | null;
+    pitch_cents?: number | null;
+    amount_cents?: number | null;
+    status?: string | null;
+  },
+  reason: 'failure_limit' | 'window_elapsed' | 'sweep_failure_limit',
+): Promise<void> {
+  await captureEdgeAlert({
+    source,
+    title: REFUND_ABANDONED_TITLE,
+    level: 'fatal',
+    tags: { alert: 'refund_abandoned', reason },
+    extra: {
+      ledgerId: row.id ?? null,
+      gameId: row.game_id ?? null,
+      amountCents: row.amount_cents ?? row.pitch_cents ?? null,
+      status: row.status ?? null,
+    },
+  });
+}
 
 export function refundAttemptIsDue(row: RefundAttemptRow, nowMs = Date.now()): boolean {
   return refundSweepShouldAttempt({
@@ -125,26 +177,33 @@ export async function markRefundAttemptFailed(
   service: SupabaseClient,
   row: RefundAttemptRow,
   nowMs = Date.now(),
+  source = 'apply-game-lock',
 ): Promise<void> {
-  const next = nextRefundSweepBackoff(row.refund_failure_count ?? 0, nowMs);
+  const previous = row.refund_failure_count ?? 0;
+  const next = nextRefundSweepBackoff(previous, nowMs);
+  const gaveUp = refundSweepJustGaveUp(previous, next.failureCount);
   const { error } = await service
     .from('game_payments')
     .update({
       refund_failure_count: next.failureCount,
       refund_backoff_until: next.backoffUntil,
+      ...(gaveUp ? { refund_abandoned_at: new Date(nowMs).toISOString() } : {}),
     })
     .eq('id', row.id);
   if (error) console.error('[refund] could not record refund backoff', row.id, error);
+  if (gaveUp && !row.refund_abandoned_at) {
+    await alertRefundAbandoned(source, row, 'failure_limit');
+  }
 }
 
 export async function clearRefundAttempt(
   service: SupabaseClient,
   row: RefundAttemptRow,
 ): Promise<void> {
-  if (!(row.refund_failure_count ?? 0) && !row.refund_backoff_until) return;
+  if (!(row.refund_failure_count ?? 0) && !row.refund_backoff_until && !row.refund_abandoned_at) return;
   const { error } = await service
     .from('game_payments')
-    .update({ refund_failure_count: 0, refund_backoff_until: null })
+    .update({ refund_failure_count: 0, refund_backoff_until: null, refund_abandoned_at: null })
     .eq('id', row.id);
   if (error) console.error('[refund] could not clear refund backoff', row.id, error);
 }
@@ -187,10 +246,11 @@ export async function refundSucceededPayments(
   service: SupabaseClient,
   stripe: Stripe,
   gameId: string,
+  options?: RefundReleaseOptions,
 ): Promise<number> {
   const { data, error } = await service
     .from('game_payments')
-    .select('id, stripe_payment_intent_id, pitch_cents, game_player_id, refund_failure_count, refund_backoff_until')
+    .select('id, game_id, stripe_payment_intent_id, pitch_cents, amount_cents, game_player_id, status, refund_failure_count, refund_backoff_until, refund_abandoned_at')
     .eq('game_id', gameId)
     .eq('status', 'succeeded');
   if (error) throw error;
@@ -198,7 +258,9 @@ export async function refundSucceededPayments(
   let refunded = 0;
   for (const row of rows) {
     if (!row.stripe_payment_intent_id) continue;
-    if (!refundAttemptIsDue(row)) continue;
+    // The cron stops after the give-up. An admin calling refund-game-payments
+    // is the manual recovery path and retries those rows anyway.
+    if (!options?.manual && !refundAttemptIsDue(row)) continue;
     const scope = succeededRefundScope(await paymentHasLivePlayer(service, row));
     try {
       if (scope === 'full' || (row.pitch_cents ?? 0) > 0) {
@@ -226,7 +288,7 @@ export async function refundSucceededPayments(
         }
         continue;
       }
-      await markRefundAttemptFailed(service, row);
+      await markRefundAttemptFailed(service, row, Date.now(), options?.source ?? 'apply-game-lock');
       console.error('[refund] payment refund failed', row.stripe_payment_intent_id, refundError);
       await captureEdgeError('refund-game-payments', refundError);
     }

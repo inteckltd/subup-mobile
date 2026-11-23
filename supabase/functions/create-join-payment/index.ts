@@ -219,7 +219,7 @@ Deno.serve(async (req) => {
       const plan = planHoldExistingIntent({ status: existing.status, captureMethod: existing.capture_method });
       if (plan === 'confirm_paid') {
         reservedPlayerId = null;
-        const result = await confirmPaidJoin(service, stripe, existing.id, paymentIntentChargeId(existing.latest_charge));
+        const result = await confirmPaidJoin(service, stripe, existing.id, paymentIntentChargeId(existing.latest_charge), 'create-join-payment');
         if (result === 'skipped_refunded') {
           return jsonResponse({ ok: false, error: "Couldn't start payment" }, 400);
         }
@@ -404,7 +404,7 @@ async function confirmLegacyCapture(
   // Stop our own error path from deleting a row whose card was already captured.
   keepReservation();
   try {
-    const result = await confirmPaidJoin(service, stripe, existing.id, paymentIntentChargeId(existing.latest_charge));
+    const result = await confirmPaidJoin(service, stripe, existing.id, paymentIntentChargeId(existing.latest_charge), 'create-join-payment');
     if (result === 'skipped_refunded') {
       return jsonResponse({ ok: false, error: "Couldn't start payment" }, 400);
     }
@@ -435,7 +435,7 @@ async function markLegacyHold(
   keepReservation: () => void,
 ): Promise<Response> {
   keepReservation();
-  const result = await authorizeJoin(service, stripe, existing);
+  const result = await authorizeJoin(service, stripe, existing, 'create-join-payment');
   if (result === 'canceled') {
     return jsonResponse({ ok: false, error: "Couldn't start payment" }, 400);
   }
