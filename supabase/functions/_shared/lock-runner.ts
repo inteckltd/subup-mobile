@@ -227,7 +227,14 @@ export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: S
       // Attach the ledger row before the PaymentIntent can become
       // requires_capture. Confirming in the create call lets
       // amount_capturable_updated win the race and cancel a hold that has
-      // no ledger row yet.
+      // no ledger row yet. The key includes how many ledger rows this seat
+      // already has, so a hold placed again after a lock move does not
+      // replay the cancelled one for 24 hours.
+      const { count: priorHolds, error: priorError } = await service
+        .from('game_payments')
+        .select('id', { count: 'exact', head: true })
+        .eq('game_player_id', row.game_player_id);
+      if (priorError) throw priorError;
       const created = await stripe.paymentIntents.create(
         {
           amount: row.total_cents,
@@ -243,9 +250,22 @@ export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: S
             game_player_id: row.game_player_id,
           },
         },
-        { idempotencyKey: `hold:${row.game_player_id}:attached` },
+        { idempotencyKey: `hold:${row.game_player_id}:${priorHolds ?? 0}` },
       );
       paymentIntentId = created.id;
+      // Stripe replays an idempotency key for 24 hours. A lock move cancels
+      // the previous hold and would otherwise hand that cancelled
+      // PaymentIntent back. Never attach one whose ledger is already canceled.
+      const { data: previousLedger, error: previousError } = await service
+        .from('game_payments')
+        .select('status')
+        .eq('stripe_payment_intent_id', created.id)
+        .maybeSingle();
+      if (previousError) throw previousError;
+      if ((previousLedger as { status?: string } | null)?.status === 'canceled') {
+        await abandonDeadOffSessionHold(service, stripe, row, created);
+        continue;
+      }
       const { error: attachError } = await service.rpc('attach_payment_intent', {
         p_game_player_id: row.game_player_id,
         p_payment_intent_id: created.id,
@@ -268,7 +288,7 @@ export async function placeDueOffSessionHolds(service: SupabaseClient, stripe: S
             off_session: true,
             error_on_requires_action: true,
           },
-          { idempotencyKey: `hold-confirm:${row.game_player_id}` },
+          { idempotencyKey: `hold-confirm:${created.id}` },
         );
       if (await settleLiveOffSessionHold(service, stripe, intent)) continue;
       if (offSessionHoldIsLive(intent.status)) continue;
@@ -672,14 +692,17 @@ export async function cancelDetachedHolds(service: SupabaseClient, stripe: Strip
         if (restoreError) throw restoreError;
         if (restored === 'restored' || restored === 'already_live') continue;
       }
-      if (!seatRemains) await markSpotMissed(service, intent.id, 'hold_canceled');
+      // A leave and an abandoned checkout also leave a detached row. The
+      // missed-spot notice is only for a hold that was still authorised.
+      const missedHold = !seatRemains && intent.status === 'requires_capture';
+      if (missedHold) await markSpotMissed(service, intent.id, 'hold_canceled');
       if (intent.status !== 'canceled') await stripe.paymentIntents.cancel(intent.id);
       const { error: markError } = await service
         .from('game_payments')
         .update({ status: 'canceled' })
         .eq('id', row.id);
       if (markError) throw markError;
-      if (!seatRemains) await notifySpotMissed(service, intent.id);
+      if (missedHold) await notifySpotMissed(service, intent.id);
       cancelled += 1;
     } catch (cancelError) {
       console.error('[lock] detach hold cancel failed', row.stripe_payment_intent_id, cancelError);
@@ -744,15 +767,18 @@ type PushRow = {
 const PUSH_LOOKBACK_MS = 6 * 60 * 60 * 1000;
 const PUSH_CLAIM_CAP = 25;
 const PUSH_CURSOR_ID = 'notifications';
-const LOCK_PUSH_TYPES = [
+// These are sent on every run, so they are the only ones the cap applies to.
+// game_cancelled and team_assigned are fetched separately for this run's
+// games: a manual cancel writes one row per player and nothing else stamps
+// them, so they must not sit at the front of this queue.
+const ALWAYS_PUSH_TYPES = [
   'game_shortfall',
   'card_confirm',
   'card_declined',
   'spot_refunded',
   'duplicate_refunded',
-  'game_cancelled',
-  'team_assigned',
 ];
+const RUN_PUSH_TYPES = ['game_cancelled', 'team_assigned'];
 
 /**
  * The first run records now and sends nothing. The previous cron already
@@ -790,33 +816,22 @@ async function pushCursor(service: SupabaseClient, nowMs: number): Promise<strin
 /**
  * Stamp pushed_at while it is still null and return only the rows this run
  * claimed. A cron outage of a few hours still delivers a push the new code
- * created. Each run asks for at most 25, oldest first.
+ * created. Card and shortfall rows are capped at 25. Cancel and team rows
+ * for this run are not, or the ones past 25 would never be sent.
  */
-export async function claimLockNotificationPushes(
+async function stampLockPushes(
   service: SupabaseClient,
+  rows: PushRow[],
   gameIds: string[],
-  nowMs = Date.now(),
+  nowMs: number,
 ): Promise<PushRow[]> {
-  const cursor = await pushCursor(service, nowMs);
-  if (!cursor) return [];
-  const since = new Date(nowMs - PUSH_LOOKBACK_MS).toISOString();
-  const windowStart = cursor > since ? cursor : since;
-  const { data, error } = await service
-    .from('notifications')
-    .select('id, user_id, title, body, data, pushed_at, created_at')
-    .gte('created_at', windowStart)
-    .is('pushed_at', null)
-    .or(LOCK_PUSH_TYPES.map((type) => `data->>type.eq.${type}`).join(','))
-    .order('created_at', { ascending: true })
-    .limit(PUSH_CLAIM_CAP);
-  if (error) throw error;
-  const rows = (data ?? []) as PushRow[];
   const claimed: PushRow[] = [];
   const stampedAt = new Date(nowMs).toISOString();
   for (const row of rows) {
     const type = typeof row.data?.type === 'string' ? row.data.type : null;
     const gameId = typeof row.data?.gameId === 'string' ? row.data.gameId : null;
-    if (!lockNotificationShouldPush({ type, pushedAt: row.pushed_at, gameId, gameIds })) continue;
+    const source = typeof row.data?.source === 'string' ? row.data.source : null;
+    if (!lockNotificationShouldPush({ type, pushedAt: row.pushed_at, gameId, gameIds, source })) continue;
     const { data: updated, error: stampError } = await service
       .from('notifications')
       .update({ pushed_at: stampedAt })
@@ -827,6 +842,58 @@ export async function claimLockNotificationPushes(
     if (Array.isArray(updated) && updated.length > 0) claimed.push(row);
   }
   return claimed;
+}
+
+export async function claimLockNotificationPushes(
+  service: SupabaseClient,
+  gameIds: string[],
+  nowMs = Date.now(),
+): Promise<PushRow[]> {
+  const cursor = await pushCursor(service, nowMs);
+  if (!cursor) return [];
+  const since = new Date(nowMs - PUSH_LOOKBACK_MS).toISOString();
+  const windowStart = cursor > since ? cursor : since;
+  const columns = 'id, user_id, title, body, data, pushed_at, created_at';
+  const { data: alwaysData, error: alwaysError } = await service
+    .from('notifications')
+    .select(columns)
+    .gte('created_at', windowStart)
+    .is('pushed_at', null)
+    .or(ALWAYS_PUSH_TYPES.map((type) => `data->>type.eq.${type}`).join(','))
+    .order('created_at', { ascending: true })
+    .limit(PUSH_CLAIM_CAP);
+  if (alwaysError) throw alwaysError;
+
+  let runRows: PushRow[] = [];
+  if (gameIds.length > 0) {
+    const { data: runData, error: runError } = await service
+      .from('notifications')
+      .select(columns)
+      .gte('created_at', windowStart)
+      .is('pushed_at', null)
+      .or(RUN_PUSH_TYPES.map((type) => `data->>type.eq.${type}`).join(','))
+      .in('data->>gameId', gameIds)
+      .order('created_at', { ascending: true });
+    if (runError) throw runError;
+    runRows = (runData ?? []) as PushRow[];
+  }
+
+  const { data: promotedData, error: promotedError } = await service
+    .from('notifications')
+    .select(columns)
+    .gte('created_at', windowStart)
+    .is('pushed_at', null)
+    .eq('data->>type', 'waitlist_promoted')
+    .eq('data->>source', 'lock')
+    .order('created_at', { ascending: true });
+  if (promotedError) throw promotedError;
+
+  const rows = [
+    ...((alwaysData ?? []) as PushRow[]),
+    ...runRows,
+    ...((promotedData ?? []) as PushRow[]),
+  ];
+  return stampLockPushes(service, rows, gameIds, nowMs);
 }
 
 export async function cancelUncapturedPayments(
@@ -1024,7 +1091,7 @@ export async function settleFailedLeave(
     originalStatus: string;
     paymentIntentId: string | null;
   },
-): Promise<'dropped' | 'restored' | 'unchanged'> {
+): Promise<{ outcome: 'dropped' | 'restored' | 'unchanged'; promotedUserId: string | null }> {
   if (!input.stripeReleased) {
     if (
       input.paymentIntentId
@@ -1038,13 +1105,18 @@ export async function settleFailedLeave(
         })
         .eq('id', input.playerId);
       if (error) throw error;
-      return 'restored';
+      return { outcome: 'restored', promotedUserId: null };
     }
-    return 'unchanged';
+    return { outcome: 'unchanged', promotedUserId: null };
   }
-  const { error } = await service.from('game_players').delete().eq('id', input.playerId);
-  if (error) return 'unchanged';
-  return 'dropped';
+  const { data, error } = await service.rpc('drop_player_after_released_leave', {
+    p_player_id: input.playerId,
+  });
+  if (error) return { outcome: 'unchanged', promotedUserId: null };
+  return {
+    outcome: 'dropped',
+    promotedUserId: typeof data === 'string' ? data : null,
+  };
 }
 
 /**

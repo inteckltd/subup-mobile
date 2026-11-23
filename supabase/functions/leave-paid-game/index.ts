@@ -84,8 +84,9 @@ Deno.serve(async (req) => {
       if (player.payment_status === 'paid' && payment?.pitch_cents == null) {
         return jsonResponse({ ok: false, error: "Couldn't refund this payment. Please try again." }, 400);
       }
+      let released: 'refunded' | 'canceled' | 'none' = 'none';
       try {
-        await refundCapturedOrCancel(stripe, service, paymentIntentId, payment?.pitch_cents ?? null);
+        released = await refundCapturedOrCancel(stripe, service, paymentIntentId, payment?.pitch_cents ?? null);
         stripeReleased = true;
       } catch (releaseError) {
         if (!isIdempotentRefundError(releaseError)) {
@@ -107,10 +108,20 @@ Deno.serve(async (req) => {
         }
         stripeReleased = true;
       }
+      if (stripeReleased && released !== 'refunded' && (player.payment_status === 'authorized' || player.payment_status === 'card_saved')) {
+        // Close the ledger now. The cancel webhook is what used to do this,
+        // and until it lands the cron treats the row as a missed hold.
+        const { error: noteError } = await service.rpc('note_hold_canceled', {
+          p_payment_intent_id: paymentIntentId,
+        });
+        if (noteError) throw noteError;
+      }
       const { error: clearError } = await service
         .from('game_players')
         .update({
           stripe_payment_intent_id: null,
+          stripe_payment_method_id: null,
+          offsession_attempted_at: new Date().toISOString(),
           payment_status: player.payment_status === 'paid' ? 'refunded' : 'card_saved',
         })
         .eq('id', player.id);
@@ -126,8 +137,8 @@ Deno.serve(async (req) => {
         originalStatus: player.payment_status,
         paymentIntentId,
       });
-      if (settled === 'dropped') {
-        return jsonResponse({ ok: true, promotedUserId: null });
+      if (settled.outcome === 'dropped') {
+        return jsonResponse({ ok: true, promotedUserId: settled.promotedUserId });
       }
       if (stripeReleased) {
         return jsonResponse({

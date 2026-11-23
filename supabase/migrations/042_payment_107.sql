@@ -78,6 +78,10 @@ as $$
 declare
   v_game public.games%rowtype;
   v_promoted public.game_players%rowtype;
+  v_group_name text;
+  v_label text;
+  v_title text;
+  v_body text;
 begin
   select * into v_game from public.games where id = p_game_id for update;
   if v_game.id is null then
@@ -110,13 +114,29 @@ begin
       end
   where id = v_promoted.id;
 
+  select grp.name into v_group_name from public.groups grp where grp.id = v_game.group_id;
+  v_label := coalesce(nullif(v_game.title, ''), v_group_name);
+  if v_game.price_cents > 0 then
+    v_title := 'Pay to stay in';
+    v_body := coalesce(v_label, 'A game') || ' — a spot opened. Pay within 30 minutes to stay in.';
+  else
+    v_title := 'You''re in';
+    v_body := coalesce(v_label, 'A game') || ' — a spot opened up. You''re now playing.';
+  end if;
+
   insert into public.notifications (user_id, type, title, body, data)
   values (
     v_promoted.user_id,
     'waitlist_promoted',
-    'You are in',
-    'A spot opened in ' || v_game.title || '.',
-    jsonb_build_object('gameId', v_game.id, 'type', 'waitlist_promoted')
+    v_title,
+    v_body,
+    jsonb_build_object(
+      'gameId', v_game.id,
+      'groupId', v_game.group_id,
+      'type', 'waitlist_promoted',
+      'source', 'lock',
+      'needsPayment', v_game.price_cents > 0
+    )
   );
 
   return v_promoted.user_id;
@@ -566,11 +586,14 @@ begin
       where id = v_game.id;
 
       insert into public.notifications (user_id, type, title, body, data)
-      select gm.user_id, 'game_cancelled', 'Game cancelled',
-             v_game.title || ' did not get a decision by kickoff, so it was cancelled.',
-             jsonb_build_object('gameId', v_game.id, 'type', 'game_cancelled')
-      from public.group_members gm
-      where gm.group_id = v_game.group_id and gm.role = 'admin';
+      select
+        gp.user_id,
+        'game_cancelled',
+        'Game cancelled',
+        v_game.title || ' did not get a decision by kickoff, so it was cancelled.',
+        jsonb_build_object('gameId', v_game.id, 'groupId', v_game.group_id, 'type', 'game_cancelled')
+      from public.game_players gp
+      where gp.game_id = v_game.id;
 
       game_id := v_game.id;
       action := 'cancelled';

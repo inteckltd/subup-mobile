@@ -15,7 +15,7 @@
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { deleteSavedStripeCustomer, prepareStripeCustomerDeletion, releaseUserUpcomingPayments } from '../_shared/lock-runner.ts';
-import { captureEdgeError } from '../_shared/sentry.ts';
+import { captureEdgeAlert, captureEdgeError } from '../_shared/sentry.ts';
 import { getStripe } from '../_shared/stripe.ts';
 
 const corsHeaders = {
@@ -208,6 +208,16 @@ Deno.serve(async (req) => {
     } catch (customerError) {
       console.error('[delete-my-account] could not check stripe customer', customerError);
       await captureEdgeError('delete-my-account', customerError);
+      // The account deletion still finishes. The id may not have been read,
+      // so the alert carries the user id and ops can find the Customer in
+      // Stripe by metadata.user_id.
+      await captureEdgeAlert({
+        source: 'delete-my-account',
+        title: 'Stripe customer not deleted',
+        level: 'error',
+        tags: { alert: 'stripe_customer_not_deleted' },
+        extra: { userId, customerId: null, openIds: [] },
+      });
     }
   }
 

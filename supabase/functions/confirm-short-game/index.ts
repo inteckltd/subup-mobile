@@ -87,7 +87,23 @@ Deno.serve(async (req) => {
         }, 400);
       }
       if (result === 'failed') {
-        await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: 'declined' });
+        // failed also means the PaymentIntent was already cancelled or
+        // refunded. Say the card was declined only when Stripe says so.
+        let reason: 'declined' | 'expired' = 'expired';
+        try {
+          const after = await stripe.paymentIntents.retrieve(player.stripe_payment_intent_id);
+          const paymentError = after.last_payment_error;
+          if (
+            paymentError?.type === 'card_error'
+            || paymentError?.code === 'card_declined'
+            || typeof paymentError?.decline_code === 'string'
+          ) {
+            reason = 'declined';
+          }
+        } catch (readError) {
+          console.error('[confirm-short-game] could not read the failed capture', readError);
+        }
+        await service.rpc('drop_unpaid_player', { p_game_player_id: player.id, p_reason: reason });
       }
     }
 

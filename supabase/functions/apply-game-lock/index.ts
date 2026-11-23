@@ -130,14 +130,32 @@ Deno.serve(async (req) => {
   }
 
   if (stripe) {
+    // Each step has its own catch. A database error while cancelling a
+    // detached hold, or these functions going out before migration 046,
+    // must not skip the capture that decides the game.
     try {
       await tidyOrphanedSetupIntents(serviceClient, stripe);
+    } catch (tidyError) {
+      console.error('[apply-game-lock] setup intent tidy failed', tidyError);
+      await captureEdgeError('apply-game-lock', tidyError);
+    }
+    try {
       await cancelDetachedHolds(serviceClient, stripe);
+    } catch (detachError) {
+      console.error('[apply-game-lock] detach hold sweep failed', detachError);
+      await captureEdgeError('apply-game-lock', detachError);
+    }
+    try {
       await placeDueOffSessionHolds(serviceClient, stripe);
-      await settleLocksBeforeSql(serviceClient, stripe);
     } catch (holdError) {
-      console.error('[apply-game-lock] hold/capture sweep failed', holdError);
+      console.error('[apply-game-lock] off-session hold sweep failed', holdError);
       await captureEdgeError('apply-game-lock', holdError);
+    }
+    try {
+      await settleLocksBeforeSql(serviceClient, stripe);
+    } catch (settleError) {
+      console.error('[apply-game-lock] lock capture sweep failed', settleError);
+      await captureEdgeError('apply-game-lock', settleError);
     }
   }
 

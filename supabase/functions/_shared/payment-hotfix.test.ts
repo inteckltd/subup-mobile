@@ -264,4 +264,6 @@ test('the refund sweep backs off and then stops', () => {
   assert.equal(lockNotificationShouldPush({ type: 'card_declined', pushedAt: 'stamped', gameId: 'g1', gameIds: [] }), false);
   assert.equal(lockNotificationShouldPush({ type: 'game_cancelled', pushedAt: null, gameId: 'g1', gameIds: ['g2'] }), false);
   assert.equal(lockNotificationShouldPush({ type: 'game_cancelled', pushedAt: null, gameId: 'g1', gameIds: ['g1'] }), true);
+  assert.equal(lockNotificationShouldPush({ type: 'waitlist_promoted', pushedAt: null, gameId: 'g1', gameIds: [], source: 'lock' }), true);
+  assert.equal(lockNotificationShouldPush({ type: 'waitlist_promoted', pushedAt: null, gameId: 'g1', gameIds: ['g1'] }), false);
 });

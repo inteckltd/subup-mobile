@@ -246,6 +246,7 @@ export function lockNotificationShouldPush(input: {
   pushedAt: string | null;
   gameId: string | null;
   gameIds: string[];
+  source?: string | null;
 }): boolean {
   if (input.pushedAt) return false;
   if (
@@ -258,6 +259,9 @@ export function lockNotificationShouldPush(input: {
   if (input.type === 'game_cancelled' || input.type === 'team_assigned') {
     return !!input.gameId && input.gameIds.includes(input.gameId);
   }
+  // The app pushes a leave's promotion itself. Only the lock cron's own
+  // promotions (source lock) are sent from here.
+  if (input.type === 'waitlist_promoted' && input.source === 'lock') return true;
   return false;
 }
 

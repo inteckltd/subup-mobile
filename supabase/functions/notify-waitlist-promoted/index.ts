@@ -26,6 +26,7 @@ const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const EXPO_BATCH_SIZE = 100;
 
 type NotificationRow = {
+  id: string;
   user_id: string;
   title: string;
   body: string | null;
@@ -109,7 +110,7 @@ Deno.serve(async (req) => {
   const since = new Date(Date.now() - 2 * 60 * 1000).toISOString();
   const { data: notifications, error: notificationsError } = await serviceClient
     .from('notifications')
-    .select('user_id, title, body, data, created_at')
+    .select('id, user_id, title, body, data, created_at')
     .eq('type', 'waitlist_promoted')
     .contains('data', { gameId })
     .gte('created_at', since)
@@ -125,6 +126,20 @@ Deno.serve(async (req) => {
   const rows = (notifications ?? []) as NotificationRow[];
   if (rows.length === 0) {
     return jsonResponse({ ok: true, notified: 0, pushed: 0 });
+  }
+
+  // A lock-sourced promotion is also claimed by the lock cron. Stamp it
+  // first so that cron does not send the same one. A leave's own promotion
+  // has no source, and stamping it is harmless.
+  if (rows[0].id) {
+    const { error: stampError } = await serviceClient
+      .from('notifications')
+      .update({ pushed_at: new Date().toISOString() })
+      .eq('id', rows[0].id)
+      .is('pushed_at', null);
+    if (stampError) {
+      console.error('[notify-waitlist-promoted] could not stamp pushed_at', stampError);
+    }
   }
 
   const recipientId = rows[0].user_id;

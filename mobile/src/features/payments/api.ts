@@ -229,7 +229,10 @@ export async function payToJoinGame(gameId: string): Promise<{ error?: string }>
 
   const synced = await supabase.functions.invoke('sync-join-payment', { body: { gameId } });
   if (synced.error) {
-    if (syncFailureStatus(synced.error) === 409) {
+    const status = syncFailureStatus(synced.error);
+    // 4xx is a real answer, including 400 "You have not joined this game".
+    // 5xx and a dropped connection are still in flight.
+    if (status != null && status >= 400 && status < 500) {
       return { error: await invokeFunctionError(synced.data, synced.error, "Couldn't keep your spot. You are not in this game.") };
     }
     return { error: STILL_CHECKING };
