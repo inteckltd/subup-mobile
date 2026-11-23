@@ -248,7 +248,12 @@ export function lockNotificationShouldPush(input: {
   gameIds: string[];
 }): boolean {
   if (input.pushedAt) return false;
-  if (input.type === 'game_shortfall' || input.type === 'card_confirm' || input.type === 'card_declined') return true;
+  if (
+    input.type === 'game_shortfall'
+    || input.type === 'card_confirm'
+    || input.type === 'card_declined'
+    || input.type === 'spot_refunded'
+  ) return true;
   if (input.type === 'game_cancelled' || input.type === 'team_assigned') {
     return !!input.gameId && input.gameIds.includes(input.gameId);
   }

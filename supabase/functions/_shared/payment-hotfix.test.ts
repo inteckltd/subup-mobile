@@ -258,6 +258,8 @@ test('the refund sweep backs off and then stops', () => {
   assert.equal(shortfallAutoCancelsAtKickoff({ startsAtMs: 1_000, shortfallOpen: true, nowMs: 999 }), false);
   assert.equal(shortfallAutoCancelsAtKickoff({ startsAtMs: 1_000, shortfallOpen: false, nowMs: 2_000 }), false);
   assert.equal(lockNotificationShouldPush({ type: 'card_declined', pushedAt: null, gameId: 'g1', gameIds: [] }), true);
+  assert.equal(lockNotificationShouldPush({ type: 'spot_refunded', pushedAt: null, gameId: 'g1', gameIds: [] }), true);
+  assert.equal(lockNotificationShouldPush({ type: 'spot_refunded', pushedAt: 'stamped', gameId: 'g1', gameIds: [] }), false);
   assert.equal(lockNotificationShouldPush({ type: 'card_declined', pushedAt: 'stamped', gameId: 'g1', gameIds: [] }), false);
   assert.equal(lockNotificationShouldPush({ type: 'game_cancelled', pushedAt: null, gameId: 'g1', gameIds: ['g2'] }), false);
   assert.equal(lockNotificationShouldPush({ type: 'game_cancelled', pushedAt: null, gameId: 'g1', gameIds: ['g1'] }), true);

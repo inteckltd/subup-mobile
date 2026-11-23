@@ -1118,6 +1118,96 @@ async function linkedJoinRow(
 }
 
 /**
+ * Remember that this payment missed its spot, before the refund or cancel.
+ * A later retry still sees the pending value and can send the one push.
+ * A refund replaces a hold note that has not been sent yet.
+ */
+async function markSpotMissed(
+  service: SupabaseClient,
+  paymentIntentId: string,
+  outcome: 'refunded' | 'hold_canceled',
+): Promise<void> {
+  const { error } = await service
+    .from('game_payments')
+    .update({ spot_refund_notice: outcome })
+    .eq('stripe_payment_intent_id', paymentIntentId)
+    .is('spot_refund_notice', null);
+  if (error) throw error;
+  if (outcome !== 'refunded') return;
+  const { error: promoteError } = await service
+    .from('game_payments')
+    .update({ spot_refund_notice: outcome })
+    .eq('stripe_payment_intent_id', paymentIntentId)
+    .eq('spot_refund_notice', 'hold_canceled');
+  if (promoteError) throw promoteError;
+}
+
+/**
+ * One in-app notice, pushed by the lock cron to anyone with a push token.
+ * Claiming the pending notice is the dedupe: a webhook retry or the sweep
+ * updates zero rows and does not insert again. The notification type stays
+ * `payment`, which 1.0.6 already opens on the game when data.gameId is set.
+ */
+async function notifySpotMissed(service: SupabaseClient, paymentIntentId: string): Promise<void> {
+  const { data, error } = await service
+    .from('game_payments')
+    .select('id, user_id, game_id, spot_refund_notice')
+    .eq('stripe_payment_intent_id', paymentIntentId)
+    .maybeSingle();
+  if (error) throw error;
+  const row = data as {
+    id?: string;
+    user_id?: string | null;
+    game_id?: string | null;
+    spot_refund_notice?: string | null;
+  } | null;
+  const outcome = row?.spot_refund_notice;
+  if (!row?.id || !row.user_id || !row.game_id) return;
+  if (outcome !== 'refunded' && outcome !== 'hold_canceled') return;
+
+  const { data: game, error: gameError } = await service
+    .from('games')
+    .select('status, group_id')
+    .eq('id', row.game_id)
+    .maybeSingle();
+  if (gameError) throw gameError;
+  const gameRow = game as { status?: string; group_id?: string | null } | null;
+  if (gameRow?.status !== 'open' && gameRow?.status !== 'full') return;
+
+  const sent = outcome === 'hold_canceled' ? 'sent_hold_canceled' : 'sent_refunded';
+  const { data: claimed, error: claimError } = await service
+    .from('game_payments')
+    .update({ spot_refund_notice: sent })
+    .eq('id', row.id)
+    .eq('spot_refund_notice', outcome)
+    .select('id');
+  if (claimError) throw claimError;
+  if (!Array.isArray(claimed) || claimed.length === 0) return;
+
+  const { error: insertError } = await service.from('notifications').insert({
+    user_id: row.user_id,
+    type: 'payment',
+    title: 'Game was full',
+    body: outcome === 'hold_canceled'
+      ? "Sorry, the spot went before your payment finished, so your card won't be charged."
+      : "Sorry, the spot went before your payment finished, so we've refunded you in full.",
+    data: {
+      gameId: row.game_id,
+      groupId: gameRow.group_id ?? null,
+      type: 'spot_refunded',
+    },
+  });
+  if (insertError) {
+    await service
+      .from('game_payments')
+      .update({ spot_refund_notice: outcome })
+      .eq('id', row.id)
+      .eq('spot_refund_notice', sent);
+    throw insertError;
+  }
+}
+
+/**
  * The success RPC found no player. Seat them if the game still has room;
  * otherwise give the money back (pitch and fee) or drop the hold.
  */
@@ -1137,11 +1227,13 @@ async function healMissingPlayer(
       p_payment_intent_id: paymentIntentId,
     });
     if (error) throw error;
+    await notifySpotMissed(service, paymentIntentId);
     return 'refunded';
   }
   if (kind === 'hold' && intent.status === 'canceled') {
     const { error } = await service.rpc('note_hold_canceled', { p_payment_intent_id: paymentIntentId });
     if (error) throw error;
+    await notifySpotMissed(service, paymentIntentId);
     return 'unwound';
   }
   if (kind === 'hold' && intent.status === 'succeeded') {
@@ -1174,10 +1266,14 @@ async function healMissingPlayer(
         new Error(`Not healing PaymentIntent ${paymentIntentId}: metadata is not a matching SubUp join`),
       );
     }
+    if (restoreResult === 'refunded' || restoreResult === 'unwound') {
+      await notifySpotMissed(service, paymentIntentId);
+    }
     return restoreResult;
   }
 
   if (action === 'refund_full') {
+    await markSpotMissed(service, paymentIntentId, 'refunded');
     try {
       await refundPaymentIntent(stripe, paymentIntentId, 0, {
         paymentRowId: await paymentRowId(service, paymentIntentId),
@@ -1191,9 +1287,11 @@ async function healMissingPlayer(
     });
     if (markError) throw markError;
     console.error('[lock] orphaned capture refunded in full', paymentIntentId);
+    await notifySpotMissed(service, paymentIntentId);
     return 'refunded';
   }
 
+  await markSpotMissed(service, paymentIntentId, 'hold_canceled');
   try {
     await stripe.paymentIntents.cancel(paymentIntentId);
   } catch (cancelError) {
@@ -1206,7 +1304,16 @@ async function healMissingPlayer(
         paymentIntentChargeId(again.latest_charge),
         source,
       );
-      return seated === 'confirmed' ? 'restored' : 'refunded';
+      if (seated === 'confirmed') {
+        await service
+          .from('game_payments')
+          .update({ spot_refund_notice: null })
+          .eq('stripe_payment_intent_id', paymentIntentId)
+          .eq('spot_refund_notice', 'hold_canceled');
+        return 'restored';
+      }
+      await notifySpotMissed(service, paymentIntentId);
+      return 'refunded';
     }
     if (again.status !== 'canceled') throw cancelError;
   }
@@ -1215,6 +1322,7 @@ async function healMissingPlayer(
   });
   if (noteError) throw noteError;
   console.error('[lock] orphaned hold cancelled', paymentIntentId);
+  await notifySpotMissed(service, paymentIntentId);
   return 'unwound';
 }
 
@@ -1258,7 +1366,10 @@ export async function confirmPaidJoin(
     .eq('stripe_payment_intent_id', paymentIntentId)
     .maybeSingle();
   if (error) throw error;
-  if ((data as { status?: string } | null)?.status === 'refunded') return 'skipped_refunded';
+  if ((data as { status?: string } | null)?.status === 'refunded') {
+    await notifySpotMissed(service, paymentIntentId);
+    return 'skipped_refunded';
+  }
   const { data: gameId, error: rpcError } = await service.rpc('confirm_paid_join', {
     p_payment_intent_id: paymentIntentId,
     p_charge_id: chargeId,

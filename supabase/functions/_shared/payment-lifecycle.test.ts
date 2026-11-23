@@ -1220,3 +1220,107 @@ test('deleting an account removes the Stripe customer only when nothing is still
   assert.equal(stripeDown.result, 'failed');
   assert.equal(stripeDown.lines.filter((line) => line.includes('stripe_customer_not_deleted')).length, 1);
 });
+
+test('a missed spot is told once when the payment is refunded or the hold is cancelled', async () => {
+  function fullNotices(db: Database) {
+    return db.notifications.filter((row) => (row.data as { type?: string } | undefined)?.type === 'spot_refunded');
+  }
+
+  const refunded = emptyDb();
+  refunded.games.push({ id: 'g1', status: 'open', group_id: 'grp' });
+  refunded.game_payments.push({
+    id: 'pay-full',
+    game_id: 'g1',
+    user_id: 'u1',
+    game_player_id: null,
+    stripe_payment_intent_id: 'pi_full',
+    pitch_cents: 1000,
+    status: 'succeeded',
+    refund_failure_count: 0,
+    refund_backoff_until: null,
+  });
+  const refundStripe = healStripe({
+    id: 'pi_full',
+    status: 'succeeded',
+    capture_method: 'automatic',
+    metadata: { game_id: 'g1', user_id: 'u1' },
+    latest_charge: { id: 'ch_1', refunded: false, amount: 1100, amount_refunded: 0 },
+  });
+  const refundService = serviceFor(refunded, ledgerRpc(refunded));
+  await confirmPaidJoin(refundService as never, refundStripe.stripe as never, 'pi_full', 'ch_1');
+  assert.equal(fullNotices(refunded).length, 1);
+  assert.equal(fullNotices(refunded)[0].type, 'payment');
+  assert.equal(fullNotices(refunded)[0].title, 'Game was full');
+  assert.match(String(fullNotices(refunded)[0].body), /refunded you in full/);
+  assert.equal((fullNotices(refunded)[0].data as { gameId?: string }).gameId, 'g1');
+  assert.equal(refunded.game_payments[0].spot_refund_notice, 'sent_refunded');
+  refunded.notifications[0].id = 'notice-spot';
+  refunded.notifications[0].created_at = new Date().toISOString();
+  const claimed = await claimLockNotificationPushes(refundService as never, []);
+  assert.equal(claimed.length, 1);
+  assert.equal((claimed[0].data as { type?: string }).type, 'spot_refunded');
+  assert.equal((await claimLockNotificationPushes(refundService as never, [])).length, 0);
+  await confirmPaidJoin(refundService as never, refundStripe.stripe as never, 'pi_full', 'ch_1');
+  assert.equal(fullNotices(refunded).length, 1);
+  assert.equal(refundStripe.refunds.length, 1);
+
+  const held = emptyDb();
+  held.games.push({ id: 'g1', status: 'full', group_id: 'grp' });
+  held.game_payments.push({
+    id: 'pay-hold',
+    game_id: 'g1',
+    user_id: 'u1',
+    game_player_id: null,
+    stripe_payment_intent_id: 'pi_hold',
+    pitch_cents: 1000,
+    status: 'requires_capture',
+    refund_failure_count: 0,
+    refund_backoff_until: null,
+  });
+  const holdIntent = {
+    id: 'pi_hold',
+    status: 'requires_capture',
+    capture_method: 'manual',
+    amount_capturable: 1100,
+    payment_method: 'pm_1',
+    latest_charge: null,
+    metadata: { game_id: 'g1', user_id: 'u1' },
+  };
+  const holdStripe = healStripe(holdIntent);
+  const holdService = serviceFor(held, ledgerRpc(held));
+  assert.equal(await authorizeJoin(holdService as never, holdStripe.stripe as never, holdIntent as never), 'canceled');
+  assert.equal(fullNotices(held).length, 1);
+  assert.match(String(fullNotices(held)[0].body), /won't be charged/);
+  assert.equal(held.game_payments[0].spot_refund_notice, 'sent_hold_canceled');
+  await authorizeJoin(holdService as never, holdStripe.stripe as never, holdIntent as never);
+  assert.equal(fullNotices(held).length, 1);
+
+  const restored = emptyDb();
+  restored.games.push({ id: 'g1', status: 'open', group_id: 'grp' });
+  restored.game_payments.push({
+    id: 'pay-back',
+    game_id: 'g1',
+    user_id: 'u1',
+    game_player_id: 'gp1',
+    stripe_payment_intent_id: 'pi_stranger',
+    pitch_cents: 1000,
+    status: 'succeeded',
+    refund_failure_count: 0,
+    refund_backoff_until: null,
+  });
+  const restoredStripe = healStripe(intentFixture({ game_id: 'g1', user_id: 'u1', game_player_id: 'gp1' }));
+  const restoredRpc = (name: string, args: Record<string, unknown>) => {
+    if (name === 'confirm_paid_join') return { data: null, error: null };
+    if (name === 'restore_orphaned_join') return { data: 'restored', error: null };
+    return ledgerRpc(restored)(name, args);
+  };
+  await confirmPaidJoin(
+    serviceFor(restored, restoredRpc) as never,
+    restoredStripe.stripe as never,
+    'pi_stranger',
+    'ch_1',
+  );
+  assert.equal(fullNotices(restored).length, 0);
+  assert.equal(restoredStripe.refunds.length, 0);
+  assert.equal(restored.game_payments[0].spot_refund_notice ?? null, null);
+});
